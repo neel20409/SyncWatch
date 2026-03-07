@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #FF3B3B;
+  --surface: #0D0D0D;
+  --panel: #161616;
+  --border: #262626;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--surface);
+  color: #E8E8E8;
+  font-family: 'DM Sans', sans-serif;
+  margin: 0;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--panel);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
+}
+
+.font-display {
+  font-family: 'Space Mono', monospace;
+}
+
+/* Glow effects */
+.glow-red {
+  box-shadow: 0 0 20px rgba(255, 59, 59, 0.3);
+}
+
+/* Animated gradient bg */
+.gradient-bg {
+  background: radial-gradient(ellipse at top left, rgba(255,59,59,0.08) 0%, transparent 60%),
+              radial-gradient(ellipse at bottom right, rgba(255,59,59,0.05) 0%, transparent 60%),
+              #0D0D0D;
+}
