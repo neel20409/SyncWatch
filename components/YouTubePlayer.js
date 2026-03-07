@@ -11,14 +11,22 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
   const playerRef = useRef(null);
   const readyRef = useRef(false);
 
+  const safeCall = (fn) => {
+    try {
+      const p = playerRef.current;
+      if (p && readyRef.current) return fn(p);
+    } catch {}
+    return null;
+  };
+
   useImperativeHandle(ref, () => ({
-    playVideo: () => playerRef.current?.playVideo(),
-    pauseVideo: () => playerRef.current?.pauseVideo(),
-    seekTo: (time) => playerRef.current?.seekTo(time, true),
-    getCurrentTime: () => playerRef.current?.getCurrentTime() || 0,
-    getPlayerState: () => playerRef.current?.getPlayerState(),
-    loadVideo: (id) => playerRef.current?.loadVideoById(id),
-    cueVideo: (id) => playerRef.current?.cueVideoById(id),
+    playVideo: () => safeCall((p) => p.playVideo()),
+    pauseVideo: () => safeCall((p) => p.pauseVideo()),
+    seekTo: (time) => safeCall((p) => p.seekTo(time, true)),
+    getCurrentTime: () => safeCall((p) => p.getCurrentTime()) ?? 0,
+    getPlayerState: () => safeCall((p) => p.getPlayerState()) ?? -1,
+    loadVideo: (id) => safeCall((p) => p.loadVideoById(id)),
+    cueVideo: (id) => safeCall((p) => p.cueVideoById(id)),
   }));
 
   useEffect(() => {
@@ -58,7 +66,6 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
       document.head.appendChild(tag);
       window.onYouTubeIframeAPIReady = initPlayer;
     } else {
-      // API is loading, wait
       const interval = setInterval(() => {
         if (window.YT && window.YT.Player) {
           clearInterval(interval);
@@ -69,8 +76,9 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
     }
 
     return () => {
+      readyRef.current = false;
       if (playerRef.current) {
-        playerRef.current.destroy();
+        try { playerRef.current.destroy(); } catch {}
         playerRef.current = null;
       }
     };
