@@ -21,19 +21,24 @@ export default function Login() {
         body: JSON.stringify(form),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Login failed");
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        setError(`Server error (${res.status}): ${res.statusText}`);
         return;
       }
 
-      // Store token in localStorage too for socket auth
+      if (!res.ok) {
+        setError(data.error || `Error ${res.status}`);
+        return;
+      }
+
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
       router.push("/dashboard");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(`Connection failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -56,7 +61,7 @@ export default function Login() {
             <p className="text-gray-500 text-sm mb-8">Sign in to your account</p>
 
             {error && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-6">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-6 break-words">
                 {error}
               </div>
             )}

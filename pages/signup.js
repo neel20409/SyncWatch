@@ -21,18 +21,26 @@ export default function Signup() {
         body: JSON.stringify(form),
       });
 
-      const data = await res.json();
+      // Try to parse JSON, fallback to status text
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        setError(`Server error (${res.status}): ${res.statusText}`);
+        return;
+      }
 
       if (!res.ok) {
-        setError(data.error || "Signup failed");
+        setError(data.error || `Error ${res.status}`);
         return;
       }
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
       router.push("/dashboard");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      // Show the real error instead of generic message
+      setError(`Connection failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -55,7 +63,7 @@ export default function Signup() {
             <p className="text-gray-500 text-sm mb-8">Start watching together for free</p>
 
             {error && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-6">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-6 break-words">
                 {error}
               </div>
             )}
