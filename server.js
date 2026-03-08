@@ -7,7 +7,9 @@ const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-const rooms = {};
+// Store rooms on global so debug endpoint can see them
+global._rooms = global._rooms || {};
+const rooms = global._rooms;
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
@@ -20,10 +22,15 @@ app.prepare().then(() => {
     cors: { origin: "*", methods: ["GET", "POST"], credentials: false },
     allowEIO3: true,
     transports: ["polling", "websocket"],
+    // Increase ping timeout for Railway
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
+  global._io = io;
+
   io.on("connection", (socket) => {
-    console.log(`[CONNECT] ${socket.id}`);
+    console.log(`[${process.pid}] CONNECT ${socket.id} transport=${socket.conn.transport.name}`);
 
     socket.on("join-room", ({ roomId, username }) => {
       socket.join(roomId);
@@ -31,13 +38,20 @@ app.prepare().then(() => {
       socket.data.username = username;
 
       if (!rooms[roomId]) {
-        rooms[roomId] = { videoId: "", isPlaying: false, currentTime: 0, host: socket.id, members: {}, lastUpdate: Date.now() };
+        rooms[roomId] = {
+          videoId: "",
+          isPlaying: false,
+          currentTime: 0,
+          host: socket.id,
+          members: {},
+          lastUpdate: Date.now(),
+        };
       }
       rooms[roomId].members[socket.id] = username;
 
-      // Log how many people are in the room
-      const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-      console.log(`[JOIN] ${username} (${socket.id}) joined room ${roomId}. Room size: ${roomSize}`);
+      // How many sockets are actually in this room?
+      const socketsInRoom = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+      console.log(`[${process.pid}] JOIN room=${roomId} user=${username} id=${socket.id} roomSize=${socketsInRoom}`);
 
       socket.emit("room-state", rooms[roomId]);
       socket.to(roomId).emit("user-joined", { userId: socket.id, username, members: rooms[roomId].members });
@@ -50,9 +64,8 @@ app.prepare().then(() => {
       rooms[roomId].currentTime = 0;
       rooms[roomId].isPlaying = false;
       rooms[roomId].lastUpdate = Date.now();
-      const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-      console.log(`[VIDEO-CHANGE] room=${roomId} videoId=${videoId} roomSize=${roomSize}`);
-      // Send to ALL including sender so both devices load the video
+      const socketsInRoom = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+      console.log(`[${process.pid}] VIDEO-CHANGE room=${roomId} video=${videoId} roomSize=${socketsInRoom}`);
       io.to(roomId).emit("video-changed", { videoId });
     });
 
@@ -61,10 +74,11 @@ app.prepare().then(() => {
       rooms[roomId].isPlaying = true;
       rooms[roomId].currentTime = currentTime;
       rooms[roomId].lastUpdate = Date.now();
-      const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-      console.log(`[VIDEO-PLAY] room=${roomId} time=${currentTime} roomSize=${roomSize} sender=${socket.id}`);
-      // Send to everyone EXCEPT sender
+      const socketsInRoom = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+      console.log(`[${process.pid}] VIDEO-PLAY room=${roomId} time=${currentTime} roomSize=${socketsInRoom} from=${socket.id}`);
+      // Emit to all OTHER sockets in room
       socket.to(roomId).emit("video-played", { currentTime });
+      console.log(`[${process.pid}] Emitted video-played to room ${roomId} (excluding sender)`);
     });
 
     socket.on("video-pause", ({ roomId, currentTime }) => {
@@ -72,10 +86,10 @@ app.prepare().then(() => {
       rooms[roomId].isPlaying = false;
       rooms[roomId].currentTime = currentTime;
       rooms[roomId].lastUpdate = Date.now();
-      const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-      console.log(`[VIDEO-PAUSE] room=${roomId} time=${currentTime} roomSize=${roomSize} sender=${socket.id}`);
-      // Send to everyone EXCEPT sender
+      const socketsInRoom = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+      console.log(`[${process.pid}] VIDEO-PAUSE room=${roomId} time=${currentTime} roomSize=${socketsInRoom} from=${socket.id}`);
       socket.to(roomId).emit("video-paused", { currentTime });
+      console.log(`[${process.pid}] Emitted video-paused to room ${roomId} (excluding sender)`);
     });
 
     socket.on("video-seek", ({ roomId, currentTime }) => {
@@ -98,6 +112,7 @@ app.prepare().then(() => {
 
     socket.on("disconnect", () => {
       const { roomId, username } = socket.data;
+      console.log(`[${process.pid}] DISCONNECT ${socket.id} (${username}) from room ${roomId}`);
       if (roomId && rooms[roomId]) {
         delete rooms[roomId].members[socket.id];
         if (rooms[roomId].host === socket.id) {
@@ -111,10 +126,11 @@ app.prepare().then(() => {
           io.to(roomId).emit("members-update", rooms[roomId]?.members || {});
         }
       }
-      console.log(`[DISCONNECT] ${socket.id} (${username})`);
     });
   });
 
   const PORT = process.env.PORT || 3000;
-  httpServer.listen(PORT, () => console.log(`> Ready on http://localhost:${PORT}`));
+  httpServer.listen(PORT, () => {
+    console.log(`[${process.pid}] Ready on http://localhost:${PORT}`);
+  });
 });

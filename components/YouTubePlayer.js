@@ -33,6 +33,7 @@ const YouTubePlayer = forwardRef(function YouTubePlayer({ videoId, onReady }, re
     seekTo: (t) => { try { if (readyRef.current) playerRef.current?.seekTo(t, true); } catch {} },
     getCurrentTime: () => { try { if (readyRef.current) return playerRef.current?.getCurrentTime() || 0; } catch {} return 0; },
     getState: () => { try { if (readyRef.current) return playerRef.current?.getPlayerState(); } catch {} return -1; },
+    getDuration: () => { try { if (readyRef.current) return playerRef.current?.getDuration() || 0; } catch {} return 0; },
   }));
 
   useEffect(() => {
@@ -78,3 +79,5 @@ const YouTubePlayer = forwardRef(function YouTubePlayer({ videoId, onReady }, re
 });
 
 export default YouTubePlayer;
+
+// Export a helper to get duration — called from room page

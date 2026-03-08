@@ -54,7 +54,7 @@ export default function RoomPage() {
     if (!currentVideoId) return;
     const t = setInterval(() => {
       try {
-        const d = playerRef.current?.getInternalDuration?.() || 0;
+        const d = playerRef.current?.getDuration?.() || 0;
         if (d > 0) { setDuration(d); clearInterval(t); }
       } catch {}
     }, 1000);
@@ -282,7 +282,7 @@ export default function RoomPage() {
                   />
                   <VideoControls
                     playerRef={playerRef}
-                    socket={socketRef.current}
+                    socketRef={socketRef}
                     roomId={roomId}
                     isPlaying={isPlaying}
                     currentTime={currentTime}
