@@ -33,21 +33,23 @@ export default function RoomPage() {
   const [messages, setMessages] = useState([]);
   const [videoInput, setVideoInput] = useState("");
   const [currentVideoId, setCurrentVideoId] = useState("");
-  const [playerReady, setPlayerReady] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [copied, setCopied] = useState(false);
-  // Mobile: which bottom tab is active
-  const [mobileTab, setMobileTab] = useState("chat"); // "chat" | "members"
-  // Mobile: is the bottom panel open
+  const [mobileTab, setMobileTab] = useState("chat");
   const [panelOpen, setPanelOpen] = useState(false);
-  // Track unread messages when panel is closed
   const [unread, setUnread] = useState(0);
 
   const playerRef = useRef(null);
-  const isSyncingRef = useRef(false);
   const socketRef = useRef(null);
   const pendingStateRef = useRef(null);
   const playerReadyRef = useRef(false);
+
+  // This is the KEY fix: use a timestamp instead of a boolean
+  // Any event received sets this to Date.now()
+  // We ignore outgoing events for 1 second after receiving one
+  const lastRemoteEventRef = useRef(0);
+
+  const isRemoteControlled = () => Date.now() - lastRemoteEventRef.current < 1000;
 
   const addNotification = useCallback((msg) => {
     const id = Date.now();
@@ -56,21 +58,27 @@ export default function RoomPage() {
   }, []);
 
   const applySyncState = useCallback((state) => {
-    const player = playerRef.current;
-    if (!player || !playerReadyRef.current) {
+    if (!playerReadyRef.current || !playerRef.current) {
       pendingStateRef.current = state;
       return;
     }
     if (!state.videoId) return;
+
+    lastRemoteEventRef.current = Date.now();
+
     const elapsed = state.isPlaying ? (Date.now() - state.lastUpdate) / 1000 : 0;
     const syncTime = Math.max(0, state.currentTime + elapsed);
-    isSyncingRef.current = true;
+
     try {
-      player.seekTo(syncTime);
-      if (state.isPlaying) player.playVideo();
-      else player.pauseVideo();
-    } catch (e) { console.warn("Sync error:", e); }
-    setTimeout(() => { isSyncingRef.current = false; }, 800);
+      playerRef.current.seekTo(syncTime);
+      if (state.isPlaying) {
+        playerRef.current.playVideo();
+      } else {
+        playerRef.current.pauseVideo();
+      }
+    } catch (e) {
+      console.warn("applySyncState error:", e);
+    }
   }, []);
 
   useEffect(() => {
@@ -95,13 +103,16 @@ export default function RoomPage() {
       sock.on("connect", () => {
         setConnected(true);
         setSocketStatus("Connected");
+        console.log("✅ Socket connected:", sock.id);
         sock.emit("join-room", { roomId, username: userData.username });
       });
-      sock.on("disconnect", (reason) => { setConnected(false); setSocketStatus(`Disconnected`); });
-      sock.on("connect_error", (err) => { setSocketStatus(`Error: ${err.message}`); });
-      sock.on("reconnect_attempt", (n) => { setSocketStatus(`Reconnecting... (${n})`); });
+
+      sock.on("disconnect", () => { setConnected(false); setSocketStatus("Disconnected"); });
+      sock.on("connect_error", (err) => setSocketStatus(`Error: ${err.message}`));
+      sock.on("reconnect_attempt", (n) => setSocketStatus(`Reconnecting... (${n})`));
 
       sock.on("room-state", (state) => {
+        console.log("📦 room-state received:", state);
         setMembers(state.members || {});
         if (state.videoId) {
           setCurrentVideoId(state.videoId);
@@ -114,36 +125,45 @@ export default function RoomPage() {
       sock.on("user-left", ({ username }) => addNotification(`${username} left`));
 
       sock.on("video-changed", ({ videoId }) => {
+        console.log("🎬 video-changed:", videoId);
+        lastRemoteEventRef.current = Date.now();
         setCurrentVideoId(videoId);
-        setPlayerReady(false);
         playerReadyRef.current = false;
-        isSyncingRef.current = false;
         addNotification("Video changed");
       });
 
+      // *** THE MAIN SYNC EVENTS ***
       sock.on("video-played", ({ currentTime }) => {
-        isSyncingRef.current = true;
-        try { playerRef.current?.seekTo(currentTime); playerRef.current?.playVideo(); } catch {}
-        setTimeout(() => { isSyncingRef.current = false; }, 800);
+        console.log("▶️ video-played received, currentTime:", currentTime);
+        lastRemoteEventRef.current = Date.now();
+        try {
+          playerRef.current?.seekTo(currentTime);
+          playerRef.current?.playVideo();
+        } catch (e) { console.warn(e); }
       });
 
       sock.on("video-paused", ({ currentTime }) => {
-        isSyncingRef.current = true;
-        try { playerRef.current?.seekTo(currentTime); playerRef.current?.pauseVideo(); } catch {}
-        setTimeout(() => { isSyncingRef.current = false; }, 800);
+        console.log("⏸️ video-paused received, currentTime:", currentTime);
+        lastRemoteEventRef.current = Date.now();
+        try {
+          playerRef.current?.seekTo(currentTime);
+          playerRef.current?.pauseVideo();
+        } catch (e) { console.warn(e); }
       });
 
       sock.on("video-seeked", ({ currentTime }) => {
-        isSyncingRef.current = true;
-        try { playerRef.current?.seekTo(currentTime); } catch {}
-        setTimeout(() => { isSyncingRef.current = false; }, 500);
+        console.log("⏩ video-seeked received:", currentTime);
+        lastRemoteEventRef.current = Date.now();
+        try { playerRef.current?.seekTo(currentTime); } catch (e) { console.warn(e); }
       });
 
-      sock.on("sync-response", (state) => applySyncState(state));
+      sock.on("sync-response", (state) => {
+        console.log("🔄 sync-response:", state);
+        applySyncState(state);
+      });
 
       sock.on("chat-message", (msg) => {
         setMessages((prev) => [...prev, msg]);
-        // Increment unread if panel is closed on mobile
         setPanelOpen((open) => {
           if (!open) setUnread((u) => u + 1);
           return open;
@@ -151,31 +171,50 @@ export default function RoomPage() {
       });
     });
 
-    return () => { if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; } };
+    return () => {
+      if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; }
+    };
   }, [roomId]);
 
+  // Apply pending state once player is ready
   useEffect(() => {
-    if (playerReady && pendingStateRef.current) {
+    if (playerReadyRef.current && pendingStateRef.current) {
       const state = pendingStateRef.current;
       pendingStateRef.current = null;
-      setTimeout(() => applySyncState(state), 600);
+      setTimeout(() => applySyncState(state), 500);
     }
-  }, [playerReady, applySyncState]);
+  });
 
   const handlePlayerReady = useCallback(() => {
+    console.log("✅ Player ready");
     playerReadyRef.current = true;
-    setPlayerReady(true);
+    // Request current state from server
     socketRef.current?.emit("sync-request", { roomId });
-  }, [roomId]);
+    // Also apply any pending state
+    if (pendingStateRef.current) {
+      const state = pendingStateRef.current;
+      pendingStateRef.current = null;
+      setTimeout(() => applySyncState(state), 500);
+    }
+  }, [roomId, applySyncState]);
 
   const handlePlayerStateChange = useCallback((event) => {
-    if (isSyncingRef.current) return;
+    // If we just received a remote event, don't echo it back
+    if (isRemoteControlled()) {
+      console.log("🔇 Ignoring local state change — remote controlled");
+      return;
+    }
+
     const YT = window.YT;
     if (!YT) return;
     const player = playerRef.current;
     if (!player || typeof player.getCurrentTime !== "function") return;
+
     let currentTime = 0;
     try { currentTime = player.getCurrentTime() || 0; } catch { return; }
+
+    console.log("🎮 Local state change:", event.data, "at", currentTime);
+
     if (event.data === YT.PlayerState.PLAYING) {
       socketRef.current?.emit("video-play", { roomId, currentTime });
     } else if (event.data === YT.PlayerState.PAUSED) {
@@ -187,7 +226,6 @@ export default function RoomPage() {
     const id = extractVideoId(videoInput);
     if (!id) { addNotification("Invalid YouTube URL"); return; }
     setCurrentVideoId(id);
-    setPlayerReady(false);
     playerReadyRef.current = false;
     setVideoInput("");
     socketRef.current?.emit("video-change", { roomId, videoId: id });
@@ -220,17 +258,14 @@ export default function RoomPage() {
   return (
     <>
       <Head><title>Room {roomId} — SyncWatch</title></Head>
-
-      {/* Full screen container — different layout on mobile vs desktop */}
       <div className="bg-[#0D0D0D] h-screen flex flex-col overflow-hidden">
 
-        {/* ── HEADER ── */}
+        {/* HEADER */}
         <header className="flex items-center justify-between px-3 py-2 border-b border-[#1E1E1E] shrink-0">
           <div className="flex items-center gap-2 sm:gap-4">
             <Link href="/dashboard" className="font-display text-sm tracking-tight">
               <span className="text-[#FF3B3B]">SYNC</span><span className="text-white">WATCH</span>
             </Link>
-            {/* Room code — visible on all sizes */}
             <div className="flex items-center gap-1.5 bg-[#161616] border border-[#262626] rounded-lg px-2 py-1">
               <span className="text-gray-500 text-xs font-display hidden sm:block">ROOM</span>
               <span className="text-white text-xs font-display font-bold">{roomId}</span>
@@ -239,38 +274,28 @@ export default function RoomPage() {
               </button>
             </div>
           </div>
-
           <div className="flex items-center gap-2">
-            {/* Connection dot */}
             <div className="flex items-center gap-1.5 bg-[#161616] border border-[#262626] rounded-lg px-2 py-1">
               <div className={`w-2 h-2 rounded-full shrink-0 ${connected ? "bg-green-500 animate-pulse" : "bg-yellow-400 animate-ping"}`} />
               <span className="text-xs text-gray-400 hidden md:block max-w-[120px] truncate">{socketStatus}</span>
             </div>
-
-            {/* Member avatars */}
             <div className="hidden sm:flex items-center gap-1">
               {memberList.slice(0, 4).map((name, i) => (
                 <div key={i} className="w-7 h-7 rounded-full bg-[#262626] border border-[#333] flex items-center justify-center text-xs font-bold text-white" title={name}>
                   {name[0]?.toUpperCase()}
                 </div>
               ))}
-              {memberList.length > 4 && <span className="text-gray-500 text-xs">+{memberList.length - 4}</span>}
             </div>
-
             <button onClick={handleCopyLink} className="px-2 sm:px-3 py-1.5 text-xs border border-[#262626] text-gray-400 rounded-lg hover:border-[#FF3B3B] hover:text-white transition-colors">
               Share
             </button>
           </div>
         </header>
 
-        {/* ── BODY ── */}
-        {/* Desktop: side-by-side | Mobile: stacked with bottom sheet */}
+        {/* BODY */}
         <div className="flex flex-1 overflow-hidden min-h-0">
-
-          {/* VIDEO COLUMN */}
+          {/* Video column */}
           <div className="flex-1 flex flex-col min-w-0 p-2 sm:p-4 gap-2 sm:gap-3 overflow-hidden">
-
-            {/* URL input */}
             <div className="flex gap-2 shrink-0">
               <input
                 type="text"
@@ -280,18 +305,12 @@ export default function RoomPage() {
                 placeholder="Paste YouTube URL..."
                 className="flex-1 bg-[#161616] border border-[#262626] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#FF3B3B] transition-colors min-w-0"
               />
-              <button
-                onClick={handleVideoSubmit}
-                className="px-3 sm:px-4 py-2 bg-[#FF3B3B] text-white text-sm font-semibold rounded-lg hover:bg-red-500 transition-colors shrink-0"
-              >
+              <button onClick={handleVideoSubmit} className="px-3 sm:px-4 py-2 bg-[#FF3B3B] text-white text-sm font-semibold rounded-lg hover:bg-red-500 transition-colors shrink-0">
                 Load
               </button>
             </div>
 
-            {/* Player — 16:9 on mobile, flex-fill on desktop */}
-            <div className="w-full bg-[#161616] rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink"
-              style={{ aspectRatio: "16/9" }}
-            >
+            <div className="w-full bg-[#161616] rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink" style={{ aspectRatio: "16/9" }}>
               {currentVideoId ? (
                 <YouTubePlayer
                   key={currentVideoId}
@@ -308,14 +327,10 @@ export default function RoomPage() {
                 </div>
               )}
             </div>
-
-            {/* ── DESKTOP ONLY: Chat sidebar fills remaining space ── */}
-            {/* On mobile this is hidden — chat is in bottom sheet */}
           </div>
 
-          {/* ── DESKTOP SIDEBAR (hidden on mobile) ── */}
+          {/* Desktop sidebar */}
           <div className="hidden lg:flex w-72 xl:w-80 border-l border-[#1E1E1E] flex-col shrink-0">
-            {/* Members */}
             <div className="px-4 py-3 border-b border-[#262626] shrink-0">
               <h3 className="font-display text-xs text-gray-400 mb-2">WATCHING ({memberList.length})</h3>
               <div className="flex flex-wrap gap-1">
@@ -326,21 +341,20 @@ export default function RoomPage() {
                 ))}
               </div>
             </div>
-            {/* Chat */}
             <div className="flex-1 min-h-0">
               <Chat messages={messages} onSend={handleSendMessage} username={user?.username} />
             </div>
           </div>
 
-          {/* ── TABLET SIDEBAR (md only, narrower) ── */}
+          {/* Tablet sidebar */}
           <div className="hidden md:flex lg:hidden w-64 border-l border-[#1E1E1E] flex-col shrink-0">
             <div className="px-3 py-2 border-b border-[#262626] shrink-0">
               <h3 className="font-display text-xs text-gray-400 mb-1.5">WATCHING ({memberList.length})</h3>
               <div className="flex flex-wrap gap-1">
                 {memberList.map((name, i) => (
-                  <span key={i} className={`text-xs px-2 py-0.5 rounded-full border ${name === user?.username ? "border-[#FF3B3B]/50 text-[#FF3B3B] bg-[#FF3B3B]/10" : "border-[#262626] text-gray-400"}`}>
+                  <div key={i} className="w-6 h-6 rounded-full bg-[#262626] flex items-center justify-center text-xs font-bold text-white" title={name}>
                     {name[0]?.toUpperCase()}
-                  </span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -350,30 +364,19 @@ export default function RoomPage() {
           </div>
         </div>
 
-        {/* ── MOBILE BOTTOM BAR (visible only on mobile < md) ── */}
+        {/* Mobile bottom bar */}
         <div className="md:hidden shrink-0 border-t border-[#1E1E1E] bg-[#111] flex items-center justify-around px-2 py-1.5 z-30">
-          {/* Members button */}
-          <button
-            onClick={() => openPanel("members")}
-            className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-lg transition-colors ${mobileTab === "members" && panelOpen ? "text-[#FF3B3B]" : "text-gray-500"}`}
-          >
+          <button onClick={() => openPanel("members")} className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-lg transition-colors ${mobileTab === "members" && panelOpen ? "text-[#FF3B3B]" : "text-gray-500"}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             <span className="text-xs">{memberList.length}</span>
           </button>
-
-          {/* Connection status center */}
           <div className="flex items-center gap-1.5">
             <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-500 animate-pulse" : "bg-yellow-400 animate-ping"}`} />
-            <span className="text-xs text-gray-500 truncate max-w-[100px]">{connected ? "Live" : "..."}</span>
+            <span className="text-xs text-gray-500">{connected ? "Live" : "..."}</span>
           </div>
-
-          {/* Chat button */}
-          <button
-            onClick={() => openPanel("chat")}
-            className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-lg transition-colors relative ${mobileTab === "chat" && panelOpen ? "text-[#FF3B3B]" : "text-gray-500"}`}
-          >
+          <button onClick={() => openPanel("chat")} className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-lg transition-colors relative ${mobileTab === "chat" && panelOpen ? "text-[#FF3B3B]" : "text-gray-500"}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
@@ -386,57 +389,36 @@ export default function RoomPage() {
           </button>
         </div>
 
-        {/* ── MOBILE BOTTOM SHEET PANEL ── */}
+        {/* Mobile bottom sheet */}
         {panelOpen && (
           <div className="md:hidden fixed inset-0 z-40 flex flex-col justify-end">
-            {/* Backdrop */}
             <div className="absolute inset-0 bg-black/60" onClick={() => setPanelOpen(false)} />
-
-            {/* Panel */}
-            <div className="relative bg-[#161616] border-t border-[#262626] rounded-t-2xl flex flex-col z-50"
-              style={{ height: "60vh" }}
-            >
-              {/* Drag handle + tabs */}
+            <div className="relative bg-[#161616] border-t border-[#262626] rounded-t-2xl flex flex-col z-50" style={{ height: "60vh" }}>
               <div className="shrink-0 pt-3 pb-0 px-4">
                 <div className="w-10 h-1 bg-[#333] rounded-full mx-auto mb-3" />
                 <div className="flex items-center justify-between">
-                  {/* Tabs */}
                   <div className="flex gap-1">
-                    <button
-                      onClick={() => { setMobileTab("chat"); setUnread(0); }}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-display transition-colors ${mobileTab === "chat" ? "bg-[#FF3B3B] text-white" : "text-gray-400 hover:text-white"}`}
-                    >
-                      CHAT
-                    </button>
-                    <button
-                      onClick={() => setMobileTab("members")}
-                      className={`px-4 py-1.5 rounded-lg text-xs font-display transition-colors ${mobileTab === "members" ? "bg-[#FF3B3B] text-white" : "text-gray-400 hover:text-white"}`}
-                    >
-                      MEMBERS ({memberList.length})
-                    </button>
+                    <button onClick={() => { setMobileTab("chat"); setUnread(0); }} className={`px-4 py-1.5 rounded-lg text-xs font-display transition-colors ${mobileTab === "chat" ? "bg-[#FF3B3B] text-white" : "text-gray-400"}`}>CHAT</button>
+                    <button onClick={() => setMobileTab("members")} className={`px-4 py-1.5 rounded-lg text-xs font-display transition-colors ${mobileTab === "members" ? "bg-[#FF3B3B] text-white" : "text-gray-400"}`}>MEMBERS ({memberList.length})</button>
                   </div>
                   <button onClick={() => setPanelOpen(false)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
                 </div>
               </div>
-
-              {/* Panel content */}
               <div className="flex-1 min-h-0 overflow-hidden">
                 {mobileTab === "chat" ? (
                   <Chat messages={messages} onSend={handleSendMessage} username={user?.username} />
                 ) : (
                   <div className="p-4 overflow-y-auto h-full">
-                    <div className="flex flex-col gap-2">
-                      {memberList.map((name, i) => (
-                        <div key={i} className={`flex items-center gap-3 p-3 rounded-xl border ${name === user?.username ? "border-[#FF3B3B]/30 bg-[#FF3B3B]/5" : "border-[#262626] bg-[#111]"}`}>
-                          <div className="w-8 h-8 rounded-full bg-[#262626] flex items-center justify-center text-sm font-bold text-white shrink-0">
-                            {name[0]?.toUpperCase()}
-                          </div>
-                          <span className={`text-sm ${name === user?.username ? "text-[#FF3B3B]" : "text-gray-300"}`}>
-                            {name}{name === user?.username ? " (you)" : ""}
-                          </span>
+                    {memberList.map((name, i) => (
+                      <div key={i} className={`flex items-center gap-3 p-3 rounded-xl border mb-2 ${name === user?.username ? "border-[#FF3B3B]/30 bg-[#FF3B3B]/5" : "border-[#262626] bg-[#111]"}`}>
+                        <div className="w-8 h-8 rounded-full bg-[#262626] flex items-center justify-center text-sm font-bold text-white shrink-0">
+                          {name[0]?.toUpperCase()}
                         </div>
-                      ))}
-                    </div>
+                        <span className={`text-sm ${name === user?.username ? "text-[#FF3B3B]" : "text-gray-300"}`}>
+                          {name}{name === user?.username ? " (you)" : ""}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
