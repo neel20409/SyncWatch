@@ -1,0 +1,65 @@
+<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0D0D0D"/>
+      <stop offset="100%" style="stop-color:#111111"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Subtle grid -->
+  <g stroke="#1E1E1E" stroke-width="1" opacity="0.5">
+    <line x1="0" y1="105" x2="1200" y2="105"/>
+    <line x1="0" y1="210" x2="1200" y2="210"/>
+    <line x1="0" y1="420" x2="1200" y2="420"/>
+    <line x1="0" y1="525" x2="1200" y2="525"/>
+    <line x1="200" y1="0" x2="200" y2="630"/>
+    <line x1="400" y1="0" x2="400" y2="630"/>
+    <line x1="800" y1="0" x2="800" y2="630"/>
+    <line x1="1000" y1="0" x2="1000" y2="630"/>
+  </g>
+
+  <!-- Top red bar -->
+  <rect width="1200" height="5" fill="#FF3B3B"/>
+
+  <!-- Left glow -->
+  <circle cx="0" cy="315" r="300" fill="#FF3B3B" opacity="0.04"/>
+
+  <!-- Play button -->
+  <circle cx="160" cy="280" r="72" fill="#FF3B3B"/>
+  <polygon points="140,252 205,280 140,308" fill="white"/>
+
+  <!-- SYNCWATCH logotype -->
+  <text x="270" y="310" font-family="'Arial Black', Arial" font-weight="900" font-size="88" fill="#FF3B3B" letter-spacing="-2">SYNC</text>
+  <text x="560" y="310" font-family="'Arial Black', Arial" font-weight="900" font-size="88" fill="#FFFFFF" letter-spacing="-2">WATCH</text>
+
+  <!-- Tagline -->
+  <text x="270" y="368" font-family="Arial" font-size="28" fill="#888888" letter-spacing="1">Watch YouTube together. In perfect sync.</text>
+
+  <!-- Divider -->
+  <rect x="270" y="395" width="660" height="2" fill="#262626"/>
+
+  <!-- Features row -->
+  <circle cx="295" cy="440" r="6" fill="#FF3B3B"/>
+  <text x="312" y="446" font-family="Arial" font-size="22" fill="#555555">Real-time sync</text>
+  <circle cx="500" cy="440" r="6" fill="#FF3B3B"/>
+  <text x="517" y="446" font-family="Arial" font-size="22" fill="#555555">Live chat</text>
+  <circle cx="640" cy="440" r="6" fill="#FF3B3B"/>
+  <text x="657" y="446" font-family="Arial" font-size="22" fill="#555555">No account sharing</text>
+
+  <!-- URL badge -->
+  <rect x="270" y="490" width="580" height="44" rx="8" fill="#161616" stroke="#262626" stroke-width="1"/>
+  <text x="290" y="518" font-family="'Courier New', monospace" font-size="18" fill="#555555">syncwatch-production-bf3c.up.railway.app</text>
+
+  <!-- Two avatar bubbles (right side) -->
+  <circle cx="980" cy="260" r="65" fill="#1a1a1a" stroke="#262626" stroke-width="2"/>
+  <circle cx="1080" cy="300" r="65" fill="#FF3B3B" opacity="0.9"/>
+  <text x="950" y="268" font-family="'Arial Black', Arial" font-size="40" fill="#FF3B3B" font-weight="900" text-anchor="middle">N</text>
+  <text x="1080" y="308" font-family="'Arial Black', Arial" font-size="40" fill="white" font-weight="900" text-anchor="middle">P</text>
+  <text x="1030" y="410" font-family="Arial" font-size="18" fill="#444444" text-anchor="middle">watching together</text>
+
+  <!-- Bottom bar -->
+  <rect x="0" y="620" width="1200" height="10" fill="#FF3B3B" opacity="0.3"/>
+</svg>
