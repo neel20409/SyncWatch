@@ -41,11 +41,11 @@ export default function RoomPage() {
   const [mobileTab, setMobileTab] = useState("chat");
   const [unread, setUnread] = useState(0);
 
-  // Direct refs — same pattern as /watch page that works
-  const playerRef = useRef(null);   // raw YT.Player object
+  const playerRef = useRef(null);
   const readyRef = useRef(false);
   const socketRef = useRef(null);
-  const playerDivRef = useRef(null);
+  const playerDivRef = useRef(null); // always mounted in DOM
+  const roomIdRef = useRef(null);
 
   const addNotif = (msg) => {
     const id = Date.now();
@@ -53,7 +53,10 @@ export default function RoomPage() {
     setTimeout(() => setNotifications(p => p.filter(n => n.id !== id)), 3500);
   };
 
-  // Poll time
+  // Keep roomId in ref so effects can access it without being re-created
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+
+  // Poll player time for progress bar
   useEffect(() => {
     const t = setInterval(() => {
       if (!readyRef.current || !playerRef.current) return;
@@ -67,26 +70,28 @@ export default function RoomPage() {
     return () => clearInterval(t);
   }, []);
 
-  const roomIdRef = useRef(roomId);
-  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
-
-  // Load video when videoId changes — no useCallback, plain useEffect
+  // Init player whenever videoId changes — playerDivRef is ALWAYS mounted
   useEffect(() => {
-    if (!videoId || !playerDivRef.current) return;
+    if (!videoId) return;
 
-    // Destroy old player
     readyRef.current = false;
     try { playerRef.current?.destroy(); } catch {}
     playerRef.current = null;
-    playerDivRef.current.innerHTML = "";
 
-    const div = document.createElement("div");
-    div.style.width = "100%";
-    div.style.height = "100%";
-    playerDivRef.current.appendChild(div);
+    // Clear the div and create a fresh target
+    if (playerDivRef.current) {
+      playerDivRef.current.innerHTML = "";
+    }
+
+    const target = document.createElement("div");
+    target.style.width = "100%";
+    target.style.height = "100%";
+    if (playerDivRef.current) {
+      playerDivRef.current.appendChild(target);
+    }
 
     const create = () => {
-      playerRef.current = new window.YT.Player(div, {
+      playerRef.current = new window.YT.Player(target, {
         videoId,
         width: "100%",
         height: "100%",
@@ -147,15 +152,13 @@ export default function RoomPage() {
       });
 
       sock.on("video-changed", ({ videoId: vid }) => {
-        console.log("[ROOM] video-changed →", vid);
         setIsPlaying(false); setCurrentTime(0); setProgress(0);
         setVideoId(vid);
         addNotif("Video loaded");
       });
 
-      // EXACT same handler as /watch page
       sock.on("video-played", ({ currentTime: t }) => {
-        console.log("[ROOM] ← video-played @", t, "ready=", readyRef.current);
+        console.log("[ROOM] ← play @", t, "ready=", readyRef.current, "player=", !!playerRef.current);
         setIsPlaying(true);
         if (readyRef.current && playerRef.current) {
           playerRef.current.seekTo(t, true);
@@ -164,7 +167,7 @@ export default function RoomPage() {
       });
 
       sock.on("video-paused", ({ currentTime: t }) => {
-        console.log("[ROOM] ← video-paused @", t, "ready=", readyRef.current);
+        console.log("[ROOM] ← pause @", t, "ready=", readyRef.current, "player=", !!playerRef.current);
         setIsPlaying(false);
         if (readyRef.current && playerRef.current) {
           playerRef.current.seekTo(t, true);
@@ -198,7 +201,6 @@ export default function RoomPage() {
     return () => { socketRef.current?.disconnect(); socketRef.current = null; };
   }, [roomId]);
 
-  // Controls — exact same as /watch page
   const handlePlay = () => {
     if (!readyRef.current || !playerRef.current) return;
     const t = playerRef.current.getCurrentTime() || 0;
@@ -238,7 +240,6 @@ export default function RoomPage() {
       <Head><title>Room {roomId} — SyncWatch</title></Head>
       <div className="bg-[#0D0D0D] h-screen flex flex-col overflow-hidden">
 
-        {/* Header */}
         <header className="flex items-center justify-between px-3 py-2 border-b border-[#1E1E1E] shrink-0">
           <div className="flex items-center gap-3">
             <Link href="/dashboard" className="font-display text-sm">
@@ -261,19 +262,17 @@ export default function RoomPage() {
           </div>
         </header>
 
-        {/* Body */}
         <div className="flex flex-1 overflow-hidden min-h-0">
           <div className="flex-1 flex flex-col min-w-0 p-2 sm:p-4 gap-2 sm:gap-3 overflow-hidden">
 
-            {/* URL bar */}
             <div className="flex gap-2 shrink-0">
               <input value={videoInput} onChange={e=>setVideoInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLoad()} placeholder="Paste YouTube URL..." className="flex-1 bg-[#161616] border border-[#262626] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#FF3B3B] min-w-0" />
               <button onClick={handleLoad} className="px-4 py-2 bg-[#FF3B3B] text-white text-sm font-semibold rounded-lg hover:bg-red-500 shrink-0">Load</button>
             </div>
 
-            {/* Player */}
             <div className="w-full bg-black rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink" style={{aspectRatio:"16/9"}}>
-              {/* ALWAYS mounted so ref is always available */}
+
+              {/* playerDivRef is ALWAYS in the DOM so the ref is never null */}
               <div ref={playerDivRef} className="w-full h-full" style={{display: videoId ? "block" : "none"}} />
 
               {!videoId && (
@@ -285,33 +284,31 @@ export default function RoomPage() {
               )}
 
               {videoId && (
-                  {/* Controls overlay */}
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent px-3 pb-3 pt-10">
-                    <div className="w-full h-2 bg-white/20 rounded-full cursor-pointer mb-3 group" onClick={handleSeek}>
-                      <div className="h-full bg-[#FF3B3B] rounded-full relative" style={{width:`${progress}%`}}>
-                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {isPlaying ? (
-                        <button onClick={handlePause} className="text-white hover:text-[#FF3B3B] transition-colors">
-                          <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                        </button>
-                      ) : (
-                        <button onClick={handlePlay} className="text-white hover:text-[#FF3B3B] transition-colors">
-                          <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        </button>
-                      )}
-                      <span className="text-white/70 text-xs font-display tabular-nums select-none">{fmt(currentTime)} / {fmt(duration)}</span>
-                      <div className="flex-1" />
-                      <span className="text-white/40 text-xs">{memberList.length} watching</span>
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent px-3 pb-3 pt-10">
+                  <div className="w-full h-2 bg-white/20 rounded-full cursor-pointer mb-3 group" onClick={handleSeek}>
+                    <div className="h-full bg-[#FF3B3B] rounded-full relative" style={{width:`${progress}%`}}>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </div>
+                  <div className="flex items-center gap-3">
+                    {isPlaying ? (
+                      <button onClick={handlePause} className="text-white hover:text-[#FF3B3B] transition-colors">
+                        <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                      </button>
+                    ) : (
+                      <button onClick={handlePlay} className="text-white hover:text-[#FF3B3B] transition-colors">
+                        <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      </button>
+                    )}
+                    <span className="text-white/70 text-xs font-display tabular-nums select-none">{fmt(currentTime)} / {fmt(duration)}</span>
+                    <div className="flex-1" />
+                    <span className="text-white/40 text-xs">{memberList.length} watching</span>
+                  </div>
+                </div>
               )}
             </div>
           </div>
 
-          {/* Desktop sidebar */}
           <div className="hidden lg:flex w-72 xl:w-80 border-l border-[#1E1E1E] flex-col shrink-0">
             <div className="px-4 py-3 border-b border-[#262626] shrink-0">
               <h3 className="font-display text-xs text-gray-400 mb-2">WATCHING ({memberList.length})</h3>
@@ -328,7 +325,6 @@ export default function RoomPage() {
             </div>
           </div>
 
-          {/* Tablet sidebar */}
           <div className="hidden md:flex lg:hidden w-64 border-l border-[#1E1E1E] flex-col shrink-0">
             <div className="px-3 py-2 border-b border-[#262626] shrink-0">
               <h3 className="font-display text-xs text-gray-400 mb-1.5">WATCHING ({memberList.length})</h3>
@@ -344,7 +340,6 @@ export default function RoomPage() {
           </div>
         </div>
 
-        {/* Mobile bottom bar */}
         <div className="md:hidden shrink-0 border-t border-[#1E1E1E] bg-[#111] flex items-center justify-around px-2 py-1.5 z-30">
           <button onClick={()=>{setMobileTab("members");setPanelOpen(true);}} className={`flex flex-col items-center gap-0.5 px-4 py-1.5 ${mobileTab==="members"&&panelOpen?"text-[#FF3B3B]":"text-gray-500"}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
@@ -361,7 +356,6 @@ export default function RoomPage() {
           </button>
         </div>
 
-        {/* Mobile sheet */}
         {panelOpen&&(
           <div className="md:hidden fixed inset-0 z-40 flex flex-col justify-end">
             <div className="absolute inset-0 bg-black/60" onClick={()=>setPanelOpen(false)} />
@@ -392,7 +386,6 @@ export default function RoomPage() {
         )}
       </div>
 
-      {/* Notifications */}
       <div className="fixed bottom-20 md:bottom-4 left-1/2 -translate-x-1/2 flex flex-col gap-2 pointer-events-none z-50 w-full max-w-xs px-4">
         {notifications.map(n=>(
           <div key={n.id} className="bg-[#1A1A1A] border border-[#262626] text-white text-xs px-4 py-2 rounded-full font-display text-center">{n.msg}</div>
