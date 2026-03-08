@@ -9,22 +9,28 @@ export default async function handler(req, res) {
 
   await dbConnect();
 
-  const { email, password } = req.body;
+  const { email: rawEmail, password: rawPassword } = req.body || {};
+
+  // Trim whitespace — catches copy/paste issues
+  const email = rawEmail?.trim().toLowerCase();
+  const password = rawPassword?.trim();
 
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
 
   try {
-    const user = await User.findOne({ email });
+    // Find user — also try without case sensitivity
+    const user = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, "i") } });
 
     if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      // Debug: tell us if it's a "user not found" vs "wrong password"
+      return res.status(401).json({ error: "No account found with this email" });
     }
 
     const isValid = await user.comparePassword(password);
     if (!isValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Wrong password" });
     }
 
     const token = signToken({
@@ -49,6 +55,6 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error("Login error:", error);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: `Login failed: ${error.message}` });
   }
 }
