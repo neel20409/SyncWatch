@@ -1,95 +1,80 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 
 let apiLoaded = false;
+let apiReady = false;
+const pendingInits = [];
 
-const YouTubePlayer = forwardRef(function YouTubePlayer(
-  { videoId, onReady, onStateChange },
-  ref
-) {
-  const containerRef = useRef(null);
+function ensureAPI(cb) {
+  if (apiReady) { cb(); return; }
+  pendingInits.push(cb);
+  if (!apiLoaded) {
+    apiLoaded = true;
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+    window.onYouTubeIframeAPIReady = () => {
+      apiReady = true;
+      pendingInits.forEach(fn => fn());
+      pendingInits.length = 0;
+    };
+  }
+}
+
+const YouTubePlayer = forwardRef(function YouTubePlayer({ videoId, onReady }, ref) {
+  const divRef = useRef(null);
   const playerRef = useRef(null);
   const readyRef = useRef(false);
-  const onStateChangeRef = useRef(onStateChange);
   const onReadyRef = useRef(onReady);
-
-  // Keep refs updated without recreating the player
-  useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
   useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
 
-  const safeCall = (fn) => {
-    try {
-      const p = playerRef.current;
-      if (p && readyRef.current) return fn(p);
-    } catch {}
-    return null;
-  };
-
   useImperativeHandle(ref, () => ({
-    playVideo: () => safeCall((p) => p.playVideo()),
-    pauseVideo: () => safeCall((p) => p.pauseVideo()),
-    seekTo: (time) => safeCall((p) => p.seekTo(time, true)),
-    getCurrentTime: () => safeCall((p) => p.getCurrentTime()) ?? 0,
-    getPlayerState: () => safeCall((p) => p.getPlayerState()) ?? -1,
-    loadVideo: (id) => safeCall((p) => p.loadVideoById(id)),
-    cueVideo: (id) => safeCall((p) => p.cueVideoById(id)),
+    play: () => { try { if (readyRef.current) playerRef.current?.playVideo(); } catch {} },
+    pause: () => { try { if (readyRef.current) playerRef.current?.pauseVideo(); } catch {} },
+    seekTo: (t) => { try { if (readyRef.current) playerRef.current?.seekTo(t, true); } catch {} },
+    getCurrentTime: () => { try { if (readyRef.current) return playerRef.current?.getCurrentTime() || 0; } catch {} return 0; },
+    getState: () => { try { if (readyRef.current) return playerRef.current?.getPlayerState(); } catch {} return -1; },
   }));
 
   useEffect(() => {
-    const initPlayer = () => {
-      if (!containerRef.current) return;
-      playerRef.current = new window.YT.Player(containerRef.current, {
-        height: "100%",
-        width: "100%",
+    if (!divRef.current) return;
+    let destroyed = false;
+
+    ensureAPI(() => {
+      if (destroyed || !divRef.current) return;
+      playerRef.current = new window.YT.Player(divRef.current, {
         videoId: videoId || "",
+        width: "100%",
+        height: "100%",
         playerVars: {
-          autoplay: 0,
-          controls: 1,
+          controls: 0,        // ← DISABLE YouTube controls entirely
+          disablekb: 1,       // ← Disable keyboard shortcuts
           rel: 0,
           modestbranding: 1,
           enablejsapi: 1,
           origin: window.location.origin,
-          // Disable annotations and end screen
           iv_load_policy: 3,
-          fs: 1,
+          playsinline: 1,
         },
         events: {
           onReady: () => {
+            if (destroyed) return;
             readyRef.current = true;
             onReadyRef.current?.();
           },
-          onStateChange: (e) => {
-            onStateChangeRef.current?.(e);
-          },
+          // NO onStateChange — we don't listen to it at all
         },
       });
-    };
-
-    if (window.YT && window.YT.Player) {
-      initPlayer();
-    } else if (!apiLoaded) {
-      apiLoaded = true;
-      const tag = document.createElement("script");
-      tag.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(tag);
-      window.onYouTubeIframeAPIReady = initPlayer;
-    } else {
-      const interval = setInterval(() => {
-        if (window.YT && window.YT.Player) {
-          clearInterval(interval);
-          initPlayer();
-        }
-      }, 100);
-      return () => clearInterval(interval);
-    }
+    });
 
     return () => {
+      destroyed = true;
       readyRef.current = false;
       try { playerRef.current?.destroy(); } catch {}
       playerRef.current = null;
     };
-  }, [videoId]); // re-init when videoId changes
+  }, [videoId]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return <div ref={divRef} className="w-full h-full" />;
 });
 
 export default YouTubePlayer;

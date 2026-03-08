@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import Chat from "../../components/Chat";
 
 const YouTubePlayer = dynamic(() => import("../../components/YouTubePlayer"), { ssr: false });
+const VideoControls = dynamic(() => import("../../components/VideoControls"), { ssr: false });
 
 function extractVideoId(input) {
   if (!input) return "";
@@ -39,14 +40,37 @@ export default function RoomPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [unread, setUnread] = useState(0);
 
+  // Playback state — driven ONLY by socket events
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
   const playerRef = useRef(null);
   const socketRef = useRef(null);
   const playerReadyRef = useRef(false);
-  const pendingStateRef = useRef(null);
 
-  // Simple flag: are we currently executing a remote command?
-  // Set to true BEFORE calling player methods, set to false AFTER
-  const executingRemoteRef = useRef(false);
+  // Poll duration once player is ready
+  useEffect(() => {
+    if (!currentVideoId) return;
+    const t = setInterval(() => {
+      try {
+        const d = playerRef.current?.getInternalDuration?.() || 0;
+        if (d > 0) { setDuration(d); clearInterval(t); }
+      } catch {}
+    }, 1000);
+    return () => clearInterval(t);
+  }, [currentVideoId]);
+
+  // Update currentTime display every second
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (playerReadyRef.current) {
+        const ct = playerRef.current?.getCurrentTime() || 0;
+        setCurrentTime(ct);
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const addNotification = useCallback((msg) => {
     const id = Date.now();
@@ -75,18 +99,15 @@ export default function RoomPage() {
       sock.on("connect", () => {
         setConnected(true);
         setSocketStatus("Connected ✓");
-        console.log("[CLIENT] Connected as", sock.id);
         sock.emit("join-room", { roomId, username: userData.username });
       });
       sock.on("disconnect", () => { setConnected(false); setSocketStatus("Disconnected"); });
-      sock.on("connect_error", (e) => { setSocketStatus(`Error: ${e.message}`); console.error("[CLIENT] connect_error:", e.message); });
+      sock.on("connect_error", (e) => setSocketStatus(`Error: ${e.message}`));
 
       sock.on("room-state", (state) => {
-        console.log("[CLIENT] room-state:", state);
         setMembers(state.members || {});
         if (state.videoId) {
           setCurrentVideoId(state.videoId);
-          pendingStateRef.current = state;
         }
       });
 
@@ -94,68 +115,56 @@ export default function RoomPage() {
       sock.on("user-joined", ({ username }) => addNotification(`${username} joined`));
       sock.on("user-left", ({ username }) => addNotification(`${username} left`));
 
-      // video-changed goes to ALL users (including sender) — so handle it for everyone
+      // Video changed — load for everyone
       sock.on("video-changed", ({ videoId }) => {
-        console.log("[CLIENT] video-changed →", videoId);
-        executingRemoteRef.current = true;
+        console.log("[SYNC] video-changed →", videoId);
         playerReadyRef.current = false;
+        setIsPlaying(false);
+        setCurrentTime(0);
         setCurrentVideoId(videoId);
-        setTimeout(() => { executingRemoteRef.current = false; }, 2000);
+        addNotification("Video loaded");
       });
 
-      sock.on("video-played", ({ currentTime }) => {
-        console.log("[CLIENT] ← video-played @", currentTime, "playerReady:", playerReadyRef.current);
-        executingRemoteRef.current = true;
-        const p = playerRef.current;
-        if (p && playerReadyRef.current) {
-          try {
-            p.seekTo(currentTime);
-            p.playVideo();
-          } catch (e) { console.error("[CLIENT] play error:", e); }
-        } else {
-          console.warn("[CLIENT] player not ready for video-played, queueing");
-          pendingStateRef.current = { videoId: currentVideoId, isPlaying: true, currentTime, lastUpdate: Date.now() };
-        }
-        setTimeout(() => { executingRemoteRef.current = false; }, 1500);
+      // ✅ PLAY — just call play and update state. No guards needed.
+      sock.on("video-played", ({ currentTime: t }) => {
+        console.log("[SYNC] ← video-played @", t);
+        setIsPlaying(true);
+        setCurrentTime(t);
+        try {
+          playerRef.current?.seekTo(t);
+          playerRef.current?.play();
+        } catch (e) { console.warn(e); }
       });
 
-      sock.on("video-paused", ({ currentTime }) => {
-        console.log("[CLIENT] ← video-paused @", currentTime, "playerReady:", playerReadyRef.current);
-        executingRemoteRef.current = true;
-        const p = playerRef.current;
-        if (p && playerReadyRef.current) {
-          try {
-            p.seekTo(currentTime);
-            p.pauseVideo();
-          } catch (e) { console.error("[CLIENT] pause error:", e); }
-        } else {
-          console.warn("[CLIENT] player not ready for video-paused, queueing");
-          pendingStateRef.current = { videoId: currentVideoId, isPlaying: false, currentTime, lastUpdate: Date.now() };
-        }
-        setTimeout(() => { executingRemoteRef.current = false; }, 1500);
+      // ✅ PAUSE — just call pause and update state. No guards needed.
+      sock.on("video-paused", ({ currentTime: t }) => {
+        console.log("[SYNC] ← video-paused @", t);
+        setIsPlaying(false);
+        setCurrentTime(t);
+        try {
+          playerRef.current?.seekTo(t);
+          playerRef.current?.pause();
+        } catch (e) { console.warn(e); }
       });
 
-      sock.on("video-seeked", ({ currentTime }) => {
-        console.log("[CLIENT] ← video-seeked @", currentTime);
-        executingRemoteRef.current = true;
-        try { playerRef.current?.seekTo(currentTime); } catch {}
-        setTimeout(() => { executingRemoteRef.current = false; }, 1000);
+      sock.on("video-seeked", ({ currentTime: t }) => {
+        console.log("[SYNC] ← video-seeked @", t);
+        setCurrentTime(t);
+        try { playerRef.current?.seekTo(t); } catch {}
       });
 
       sock.on("sync-response", (state) => {
-        console.log("[CLIENT] sync-response:", state);
+        console.log("[SYNC] sync-response:", state);
         if (!state.videoId) return;
-        executingRemoteRef.current = true;
         const elapsed = state.isPlaying ? (Date.now() - state.lastUpdate) / 1000 : 0;
         const t = Math.max(0, state.currentTime + elapsed);
-        const p = playerRef.current;
-        if (p && playerReadyRef.current) {
-          try {
-            p.seekTo(t);
-            if (state.isPlaying) p.playVideo(); else p.pauseVideo();
-          } catch {}
-        }
-        setTimeout(() => { executingRemoteRef.current = false; }, 1500);
+        setIsPlaying(state.isPlaying);
+        setCurrentTime(t);
+        try {
+          playerRef.current?.seekTo(t);
+          if (state.isPlaying) playerRef.current?.play();
+          else playerRef.current?.pause();
+        } catch {}
       });
 
       sock.on("chat-message", (msg) => {
@@ -167,61 +176,10 @@ export default function RoomPage() {
     return () => { socketRef.current?.disconnect(); socketRef.current = null; };
   }, [roomId]);
 
-  // When player becomes ready, flush any pending state
   const handlePlayerReady = useCallback(() => {
-    console.log("[PLAYER] onReady fired");
+    console.log("[PLAYER] ready");
     playerReadyRef.current = true;
-
-    if (pendingStateRef.current) {
-      const state = pendingStateRef.current;
-      pendingStateRef.current = null;
-      console.log("[PLAYER] applying pending state:", state);
-      executingRemoteRef.current = true;
-      setTimeout(() => {
-        const elapsed = state.isPlaying ? (Date.now() - state.lastUpdate) / 1000 : 0;
-        const t = Math.max(0, state.currentTime + elapsed);
-        try {
-          playerRef.current?.seekTo(t);
-          if (state.isPlaying) playerRef.current?.playVideo();
-          else playerRef.current?.pauseVideo();
-        } catch {}
-        setTimeout(() => { executingRemoteRef.current = false; }, 1500);
-      }, 300);
-    } else {
-      // Request sync from server
-      socketRef.current?.emit("sync-request", { roomId });
-    }
-  }, [roomId]);
-
-  const handlePlayerStateChange = useCallback((event) => {
-    // If WE are executing a remote command, ignore this event completely
-    if (executingRemoteRef.current) {
-      console.log("[PLAYER] state change ignored — executing remote command. state:", event.data);
-      return;
-    }
-
-    const YT = window.YT;
-    if (!YT) return;
-
-    // Only care about PLAYING and PAUSED — ignore buffering (3), unstarted (-1), cued (5), ended (0)
-    if (event.data !== YT.PlayerState.PLAYING && event.data !== YT.PlayerState.PAUSED) {
-      console.log("[PLAYER] state change ignored — not play/pause. state:", event.data);
-      return;
-    }
-
-    const p = playerRef.current;
-    if (!p || typeof p.getCurrentTime !== "function") return;
-
-    let currentTime = 0;
-    try { currentTime = p.getCurrentTime() || 0; } catch { return; }
-
-    if (event.data === YT.PlayerState.PLAYING) {
-      console.log("[PLAYER] → emitting video-play @", currentTime);
-      socketRef.current?.emit("video-play", { roomId, currentTime });
-    } else {
-      console.log("[PLAYER] → emitting video-pause @", currentTime);
-      socketRef.current?.emit("video-pause", { roomId, currentTime });
-    }
+    socketRef.current?.emit("sync-request", { roomId });
   }, [roomId]);
 
   const handleVideoSubmit = () => {
@@ -229,7 +187,8 @@ export default function RoomPage() {
     if (!id) { addNotification("Invalid YouTube URL"); return; }
     playerReadyRef.current = false;
     setVideoInput("");
-    // Emit first — server will broadcast to ALL including us
+    setIsPlaying(false);
+    setCurrentTime(0);
     socketRef.current?.emit("video-change", { roomId, videoId: id });
   };
 
@@ -296,7 +255,6 @@ export default function RoomPage() {
 
         {/* BODY */}
         <div className="flex flex-1 overflow-hidden min-h-0">
-          {/* Video column */}
           <div className="flex-1 flex flex-col min-w-0 p-2 sm:p-4 gap-2 sm:gap-3 overflow-hidden">
             <div className="flex gap-2 shrink-0">
               <input
@@ -312,15 +270,25 @@ export default function RoomPage() {
               </button>
             </div>
 
-            <div className="w-full bg-[#161616] rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink" style={{ aspectRatio: "16/9" }}>
+            {/* Player with custom controls overlay */}
+            <div className="w-full bg-black rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink" style={{ aspectRatio: "16/9" }}>
               {currentVideoId ? (
-                <YouTubePlayer
-                  key={currentVideoId}
-                  ref={playerRef}
-                  videoId={currentVideoId}
-                  onReady={handlePlayerReady}
-                  onStateChange={handlePlayerStateChange}
-                />
+                <>
+                  <YouTubePlayer
+                    key={currentVideoId}
+                    ref={playerRef}
+                    videoId={currentVideoId}
+                    onReady={handlePlayerReady}
+                  />
+                  <VideoControls
+                    playerRef={playerRef}
+                    socket={socketRef.current}
+                    roomId={roomId}
+                    isPlaying={isPlaying}
+                    currentTime={currentTime}
+                    duration={duration}
+                  />
+                </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 sm:p-8">
                   <div className="text-4xl sm:text-5xl mb-3">🎬</div>
