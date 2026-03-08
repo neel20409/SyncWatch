@@ -6,7 +6,6 @@ import dynamic from "next/dynamic";
 import Chat from "../../components/Chat";
 
 const YouTubePlayer = dynamic(() => import("../../components/YouTubePlayer"), { ssr: false });
-const VideoControls = dynamic(() => import("../../components/VideoControls"), { ssr: false });
 
 function extractVideoId(input) {
   if (!input) return "";
@@ -21,6 +20,13 @@ function extractVideoId(input) {
     if (m) return m[1];
   }
   return "";
+}
+
+function fmt(s) {
+  if (!s || isNaN(s)) return "0:00";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
 export default function RoomPage() {
@@ -40,42 +46,35 @@ export default function RoomPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [unread, setUnread] = useState(0);
 
-  // Playback state — driven ONLY by socket events
+  // Playback UI state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [progress, setProgress] = useState(0);
 
   const playerRef = useRef(null);
   const socketRef = useRef(null);
   const playerReadyRef = useRef(false);
 
-  // Poll duration once player is ready
-  useEffect(() => {
-    if (!currentVideoId) return;
-    const t = setInterval(() => {
-      try {
-        const d = playerRef.current?.getDuration?.() || 0;
-        if (d > 0) { setDuration(d); clearInterval(t); }
-      } catch {}
-    }, 1000);
-    return () => clearInterval(t);
-  }, [currentVideoId]);
-
-  // Update currentTime display every second
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (playerReadyRef.current) {
-        const ct = playerRef.current?.getCurrentTime() || 0;
-        setCurrentTime(ct);
-      }
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
-
   const addNotification = useCallback((msg) => {
     const id = Date.now();
     setNotifications((p) => [...p, { id, msg }]);
     setTimeout(() => setNotifications((p) => p.filter((n) => n.id !== id)), 3500);
+  }, []);
+
+  // Poll player time every second for progress bar
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!playerReadyRef.current || !playerRef.current) return;
+      try {
+        const ct = playerRef.current.getCurrentTime() || 0;
+        const d = playerRef.current.getDuration() || 0;
+        setCurrentTime(ct);
+        setDuration(d);
+        if (d > 0) setProgress((ct / d) * 100);
+      } catch {}
+    }, 500);
+    return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
@@ -106,65 +105,63 @@ export default function RoomPage() {
 
       sock.on("room-state", (state) => {
         setMembers(state.members || {});
-        if (state.videoId) {
-          setCurrentVideoId(state.videoId);
-        }
+        if (state.videoId) setCurrentVideoId(state.videoId);
       });
 
       sock.on("members-update", (m) => setMembers(m));
       sock.on("user-joined", ({ username }) => addNotification(`${username} joined`));
       sock.on("user-left", ({ username }) => addNotification(`${username} left`));
 
-      // Video changed — load for everyone
       sock.on("video-changed", ({ videoId }) => {
-        console.log("[SYNC] video-changed →", videoId);
+        console.log("[ROOM] video-changed →", videoId);
         playerReadyRef.current = false;
         setIsPlaying(false);
         setCurrentTime(0);
+        setProgress(0);
         setCurrentVideoId(videoId);
         addNotification("Video loaded");
       });
 
-      // ✅ PLAY — just call play and update state. No guards needed.
+      // ✅ PLAY received from other device
       sock.on("video-played", ({ currentTime: t }) => {
-        console.log("[SYNC] ← video-played @", t);
+        console.log("[ROOM] ← video-played @", t, "playerReady:", playerReadyRef.current);
         setIsPlaying(true);
         setCurrentTime(t);
-        try {
-          playerRef.current?.seekTo(t);
-          playerRef.current?.play();
-        } catch (e) { console.warn(e); }
+        if (playerRef.current && playerReadyRef.current) {
+          playerRef.current.seekTo(t);
+          playerRef.current.play();
+        }
       });
 
-      // ✅ PAUSE — just call pause and update state. No guards needed.
+      // ✅ PAUSE received from other device
       sock.on("video-paused", ({ currentTime: t }) => {
-        console.log("[SYNC] ← video-paused @", t);
+        console.log("[ROOM] ← video-paused @", t, "playerReady:", playerReadyRef.current);
         setIsPlaying(false);
         setCurrentTime(t);
-        try {
-          playerRef.current?.seekTo(t);
-          playerRef.current?.pause();
-        } catch (e) { console.warn(e); }
+        if (playerRef.current && playerReadyRef.current) {
+          playerRef.current.seekTo(t);
+          playerRef.current.pause();
+        }
       });
 
       sock.on("video-seeked", ({ currentTime: t }) => {
-        console.log("[SYNC] ← video-seeked @", t);
         setCurrentTime(t);
-        try { playerRef.current?.seekTo(t); } catch {}
+        if (playerRef.current && playerReadyRef.current) {
+          playerRef.current.seekTo(t);
+        }
       });
 
       sock.on("sync-response", (state) => {
-        console.log("[SYNC] sync-response:", state);
         if (!state.videoId) return;
         const elapsed = state.isPlaying ? (Date.now() - state.lastUpdate) / 1000 : 0;
         const t = Math.max(0, state.currentTime + elapsed);
         setIsPlaying(state.isPlaying);
         setCurrentTime(t);
-        try {
-          playerRef.current?.seekTo(t);
-          if (state.isPlaying) playerRef.current?.play();
-          else playerRef.current?.pause();
-        } catch {}
+        if (playerRef.current && playerReadyRef.current) {
+          playerRef.current.seekTo(t);
+          if (state.isPlaying) playerRef.current.play();
+          else playerRef.current.pause();
+        }
       });
 
       sock.on("chat-message", (msg) => {
@@ -177,10 +174,37 @@ export default function RoomPage() {
   }, [roomId]);
 
   const handlePlayerReady = useCallback(() => {
-    console.log("[PLAYER] ready");
+    console.log("[ROOM] player ready");
     playerReadyRef.current = true;
     socketRef.current?.emit("sync-request", { roomId });
   }, [roomId]);
+
+  // ── OUR OWN PLAY/PAUSE/SEEK — emit directly to socket ──
+  const handlePlay = () => {
+    const t = playerRef.current?.getCurrentTime() || 0;
+    console.log("[ROOM] LOCAL play →", t);
+    playerRef.current?.play();
+    setIsPlaying(true);
+    socketRef.current?.emit("video-play", { roomId, currentTime: t });
+  };
+
+  const handlePause = () => {
+    const t = playerRef.current?.getCurrentTime() || 0;
+    console.log("[ROOM] LOCAL pause →", t);
+    playerRef.current?.pause();
+    setIsPlaying(false);
+    socketRef.current?.emit("video-pause", { roomId, currentTime: t });
+  };
+
+  const handleSeekBar = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const t = pct * (duration || 0);
+    playerRef.current?.seekTo(t);
+    setCurrentTime(t);
+    setProgress(pct * 100);
+    socketRef.current?.emit("video-seek", { roomId, currentTime: t });
+  };
 
   const handleVideoSubmit = () => {
     const id = extractVideoId(videoInput);
@@ -189,6 +213,7 @@ export default function RoomPage() {
     setVideoInput("");
     setIsPlaying(false);
     setCurrentTime(0);
+    setProgress(0);
     socketRef.current?.emit("video-change", { roomId, videoId: id });
   };
 
@@ -256,6 +281,8 @@ export default function RoomPage() {
         {/* BODY */}
         <div className="flex flex-1 overflow-hidden min-h-0">
           <div className="flex-1 flex flex-col min-w-0 p-2 sm:p-4 gap-2 sm:gap-3 overflow-hidden">
+
+            {/* URL input */}
             <div className="flex gap-2 shrink-0">
               <input
                 type="text"
@@ -270,7 +297,7 @@ export default function RoomPage() {
               </button>
             </div>
 
-            {/* Player with custom controls overlay */}
+            {/* Player */}
             <div className="w-full bg-black rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink" style={{ aspectRatio: "16/9" }}>
               {currentVideoId ? (
                 <>
@@ -280,14 +307,52 @@ export default function RoomPage() {
                     videoId={currentVideoId}
                     onReady={handlePlayerReady}
                   />
-                  <VideoControls
-                    playerRef={playerRef}
-                    socketRef={socketRef}
-                    roomId={roomId}
-                    isPlaying={isPlaying}
-                    currentTime={currentTime}
-                    duration={duration}
-                  />
+
+                  {/* ── CUSTOM CONTROLS OVERLAY ── */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent px-3 pb-3 pt-10">
+                    {/* Progress bar */}
+                    <div
+                      className="w-full h-2 bg-white/20 rounded-full cursor-pointer mb-3 group relative"
+                      onClick={handleSeekBar}
+                    >
+                      <div
+                        className="h-full bg-[#FF3B3B] rounded-full relative transition-none"
+                        style={{ width: `${progress}%` }}
+                      >
+                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="flex items-center gap-3">
+                      {isPlaying ? (
+                        <button
+                          onClick={handlePause}
+                          className="text-white hover:text-[#FF3B3B] transition-colors"
+                        >
+                          <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                          </svg>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handlePlay}
+                          className="text-white hover:text-[#FF3B3B] transition-colors"
+                        >
+                          <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"/>
+                          </svg>
+                        </button>
+                      )}
+                      <span className="text-white/80 text-xs font-display tabular-nums select-none">
+                        {fmt(currentTime)} / {fmt(duration)}
+                      </span>
+                      <div className="flex-1" />
+                      <span className="text-xs text-white/40 font-display hidden sm:block">
+                        {memberList.length} watching
+                      </span>
+                    </div>
+                  </div>
                 </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 sm:p-8">
