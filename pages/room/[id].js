@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Head from "next/head";
 import Link from "next/link";
@@ -47,11 +47,11 @@ export default function RoomPage() {
   const socketRef = useRef(null);
   const playerDivRef = useRef(null);
 
-  const addNotif = useCallback((msg) => {
+  const addNotif = (msg) => {
     const id = Date.now();
     setNotifications(p => [...p, { id, msg }]);
     setTimeout(() => setNotifications(p => p.filter(n => n.id !== id)), 3500);
-  }, []);
+  };
 
   // Poll time
   useEffect(() => {
@@ -67,27 +67,35 @@ export default function RoomPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Init YouTube player — exact same as /watch page
-  const initPlayer = useCallback((vid) => {
-    if (!playerDivRef.current || !vid) return;
+  const roomIdRef = useRef(roomId);
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+
+  // Load video when videoId changes — no useCallback, plain useEffect
+  useEffect(() => {
+    if (!videoId || !playerDivRef.current) return;
+
+    // Destroy old player
     readyRef.current = false;
+    try { playerRef.current?.destroy(); } catch {}
     playerRef.current = null;
     playerDivRef.current.innerHTML = "";
 
     const div = document.createElement("div");
+    div.style.width = "100%";
+    div.style.height = "100%";
     playerDivRef.current.appendChild(div);
 
     const create = () => {
       playerRef.current = new window.YT.Player(div, {
-        videoId: vid,
+        videoId,
         width: "100%",
         height: "100%",
         playerVars: { controls: 1, playsinline: 1, enablejsapi: 1, rel: 0, modestbranding: 1, origin: window.location.origin },
         events: {
           onReady: () => {
-            console.log("[PLAYER] ready, videoId=", vid);
+            console.log("[PLAYER] ready for", videoId);
             readyRef.current = true;
-            socketRef.current?.emit("sync-request", { roomId });
+            socketRef.current?.emit("sync-request", { roomId: roomIdRef.current });
           },
           onError: (e) => console.error("[PLAYER] error", e.data),
         }
@@ -104,12 +112,13 @@ export default function RoomPage() {
         document.head.appendChild(s);
       }
     }
-  }, [roomId]);
 
-  // Load video when videoId changes
-  useEffect(() => {
-    if (videoId) initPlayer(videoId);
-  }, [videoId, initPlayer]);
+    return () => {
+      readyRef.current = false;
+      try { playerRef.current?.destroy(); } catch {}
+      playerRef.current = null;
+    };
+  }, [videoId]);
 
   // Socket setup
   useEffect(() => {
@@ -264,11 +273,18 @@ export default function RoomPage() {
 
             {/* Player */}
             <div className="w-full bg-black rounded-xl overflow-hidden border border-[#262626] relative shrink-0 md:flex-1 md:shrink" style={{aspectRatio:"16/9"}}>
-              {videoId ? (
-                <>
-                  {/* This div gets the raw YT.Player injected — same as /watch page */}
-                  <div ref={playerDivRef} className="w-full h-full" />
+              {/* ALWAYS mounted so ref is always available */}
+              <div ref={playerDivRef} className="w-full h-full" style={{display: videoId ? "block" : "none"}} />
 
+              {!videoId && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
+                  <div className="text-5xl mb-3">🎬</div>
+                  <p className="font-display text-sm text-gray-500">PASTE A YOUTUBE URL ABOVE</p>
+                  <p className="text-gray-600 text-xs mt-1">Both users will see it load automatically</p>
+                </div>
+              )}
+
+              {videoId && (
                   {/* Controls overlay */}
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent px-3 pb-3 pt-10">
                     <div className="w-full h-2 bg-white/20 rounded-full cursor-pointer mb-3 group" onClick={handleSeek}>
@@ -291,13 +307,6 @@ export default function RoomPage() {
                       <span className="text-white/40 text-xs">{memberList.length} watching</span>
                     </div>
                   </div>
-                </>
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center text-center p-8">
-                  <div className="text-5xl mb-3">🎬</div>
-                  <p className="font-display text-sm text-gray-500">PASTE A YOUTUBE URL ABOVE</p>
-                  <p className="text-gray-600 text-xs mt-1">Both users will see it load automatically</p>
-                </div>
               )}
             </div>
           </div>
