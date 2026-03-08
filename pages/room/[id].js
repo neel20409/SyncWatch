@@ -22,6 +22,9 @@ function extractVideoId(input) {
   return "";
 }
 
+// How long to suppress local events after a remote event (ms)
+const REMOTE_LOCK_MS = 1500;
+
 export default function RoomPage() {
   const router = useRouter();
   const { id: roomId } = router.query;
@@ -41,15 +44,13 @@ export default function RoomPage() {
 
   const playerRef = useRef(null);
   const socketRef = useRef(null);
-  const pendingStateRef = useRef(null);
   const playerReadyRef = useRef(false);
+  const pendingStateRef = useRef(null);
+  // Timestamp of last remote event — local events are ignored for REMOTE_LOCK_MS after
+  const remoteLockUntilRef = useRef(0);
 
-  // This is the KEY fix: use a timestamp instead of a boolean
-  // Any event received sets this to Date.now()
-  // We ignore outgoing events for 1 second after receiving one
-  const lastRemoteEventRef = useRef(0);
-
-  const isRemoteControlled = () => Date.now() - lastRemoteEventRef.current < 1000;
+  const lockRemote = () => { remoteLockUntilRef.current = Date.now() + REMOTE_LOCK_MS; };
+  const isLocked = () => Date.now() < remoteLockUntilRef.current;
 
   const addNotification = useCallback((msg) => {
     const id = Date.now();
@@ -57,17 +58,20 @@ export default function RoomPage() {
     setTimeout(() => setNotifications((prev) => prev.filter((n) => n.id !== id)), 3500);
   }, []);
 
-  const applySyncState = useCallback((state) => {
+  // Called when we want to sync state from server to player
+  const applyState = useCallback((state) => {
     if (!playerReadyRef.current || !playerRef.current) {
       pendingStateRef.current = state;
       return;
     }
     if (!state.videoId) return;
 
-    lastRemoteEventRef.current = Date.now();
+    lockRemote(); // suppress local events for REMOTE_LOCK_MS
 
     const elapsed = state.isPlaying ? (Date.now() - state.lastUpdate) / 1000 : 0;
     const syncTime = Math.max(0, state.currentTime + elapsed);
+
+    console.log(`[SYNC] ${state.isPlaying ? "▶ play" : "⏸ pause"} @ ${syncTime.toFixed(1)}s`);
 
     try {
       playerRef.current.seekTo(syncTime);
@@ -76,13 +80,12 @@ export default function RoomPage() {
       } else {
         playerRef.current.pauseVideo();
       }
-    } catch (e) {
-      console.warn("applySyncState error:", e);
-    }
+    } catch (e) { console.warn("applyState error:", e); }
   }, []);
 
   useEffect(() => {
     if (!roomId) return;
+
     const stored = localStorage.getItem("user");
     if (!stored) { router.push(`/login?redirect=/room/${roomId}`); return; }
     const userData = JSON.parse(stored);
@@ -103,16 +106,14 @@ export default function RoomPage() {
       sock.on("connect", () => {
         setConnected(true);
         setSocketStatus("Connected");
-        console.log("✅ Socket connected:", sock.id);
         sock.emit("join-room", { roomId, username: userData.username });
       });
-
       sock.on("disconnect", () => { setConnected(false); setSocketStatus("Disconnected"); });
       sock.on("connect_error", (err) => setSocketStatus(`Error: ${err.message}`));
       sock.on("reconnect_attempt", (n) => setSocketStatus(`Reconnecting... (${n})`));
 
       sock.on("room-state", (state) => {
-        console.log("📦 room-state received:", state);
+        console.log("[SOCKET] room-state", state);
         setMembers(state.members || {});
         if (state.videoId) {
           setCurrentVideoId(state.videoId);
@@ -125,17 +126,16 @@ export default function RoomPage() {
       sock.on("user-left", ({ username }) => addNotification(`${username} left`));
 
       sock.on("video-changed", ({ videoId }) => {
-        console.log("🎬 video-changed:", videoId);
-        lastRemoteEventRef.current = Date.now();
-        setCurrentVideoId(videoId);
+        console.log("[SOCKET] video-changed →", videoId);
+        lockRemote();
         playerReadyRef.current = false;
+        setCurrentVideoId(videoId);
         addNotification("Video changed");
       });
 
-      // *** THE MAIN SYNC EVENTS ***
       sock.on("video-played", ({ currentTime }) => {
-        console.log("▶️ video-played received, currentTime:", currentTime);
-        lastRemoteEventRef.current = Date.now();
+        console.log("[SOCKET] video-played @ ", currentTime);
+        lockRemote();
         try {
           playerRef.current?.seekTo(currentTime);
           playerRef.current?.playVideo();
@@ -143,8 +143,8 @@ export default function RoomPage() {
       });
 
       sock.on("video-paused", ({ currentTime }) => {
-        console.log("⏸️ video-paused received, currentTime:", currentTime);
-        lastRemoteEventRef.current = Date.now();
+        console.log("[SOCKET] video-paused @ ", currentTime);
+        lockRemote();
         try {
           playerRef.current?.seekTo(currentTime);
           playerRef.current?.pauseVideo();
@@ -152,14 +152,14 @@ export default function RoomPage() {
       });
 
       sock.on("video-seeked", ({ currentTime }) => {
-        console.log("⏩ video-seeked received:", currentTime);
-        lastRemoteEventRef.current = Date.now();
+        console.log("[SOCKET] video-seeked @ ", currentTime);
+        lockRemote();
         try { playerRef.current?.seekTo(currentTime); } catch (e) { console.warn(e); }
       });
 
       sock.on("sync-response", (state) => {
-        console.log("🔄 sync-response:", state);
-        applySyncState(state);
+        console.log("[SOCKET] sync-response", state);
+        applyState(state);
       });
 
       sock.on("chat-message", (msg) => {
@@ -176,48 +176,49 @@ export default function RoomPage() {
     };
   }, [roomId]);
 
-  // Apply pending state once player is ready
+  // Flush pending state whenever player becomes ready
   useEffect(() => {
-    if (playerReadyRef.current && pendingStateRef.current) {
-      const state = pendingStateRef.current;
-      pendingStateRef.current = null;
-      setTimeout(() => applySyncState(state), 500);
-    }
-  });
+    const flush = () => {
+      if (playerReadyRef.current && pendingStateRef.current) {
+        const s = pendingStateRef.current;
+        pendingStateRef.current = null;
+        setTimeout(() => applyState(s), 400);
+      }
+    };
+    // Poll every 200ms — simple and reliable
+    const t = setInterval(flush, 200);
+    return () => clearInterval(t);
+  }, [applyState]);
 
   const handlePlayerReady = useCallback(() => {
-    console.log("✅ Player ready");
+    console.log("[PLAYER] ready");
     playerReadyRef.current = true;
-    // Request current state from server
     socketRef.current?.emit("sync-request", { roomId });
-    // Also apply any pending state
-    if (pendingStateRef.current) {
-      const state = pendingStateRef.current;
-      pendingStateRef.current = null;
-      setTimeout(() => applySyncState(state), 500);
-    }
-  }, [roomId, applySyncState]);
+  }, [roomId]);
 
   const handlePlayerStateChange = useCallback((event) => {
-    // If we just received a remote event, don't echo it back
-    if (isRemoteControlled()) {
-      console.log("🔇 Ignoring local state change — remote controlled");
+    if (isLocked()) {
+      console.log("[PLAYER] state change BLOCKED (remote lock active)", event.data);
       return;
     }
 
     const YT = window.YT;
     if (!YT) return;
+
+    // Ignore buffering (3) and unstarted (-1) and video cued (5)
+    if (![YT.PlayerState.PLAYING, YT.PlayerState.PAUSED].includes(event.data)) return;
+
     const player = playerRef.current;
     if (!player || typeof player.getCurrentTime !== "function") return;
 
     let currentTime = 0;
     try { currentTime = player.getCurrentTime() || 0; } catch { return; }
 
-    console.log("🎮 Local state change:", event.data, "at", currentTime);
-
     if (event.data === YT.PlayerState.PLAYING) {
+      console.log("[PLAYER] LOCAL play → emitting video-play @", currentTime);
       socketRef.current?.emit("video-play", { roomId, currentTime });
     } else if (event.data === YT.PlayerState.PAUSED) {
+      console.log("[PLAYER] LOCAL pause → emitting video-pause @", currentTime);
       socketRef.current?.emit("video-pause", { roomId, currentTime });
     }
   }, [roomId]);
@@ -294,7 +295,6 @@ export default function RoomPage() {
 
         {/* BODY */}
         <div className="flex flex-1 overflow-hidden min-h-0">
-          {/* Video column */}
           <div className="flex-1 flex flex-col min-w-0 p-2 sm:p-4 gap-2 sm:gap-3 overflow-hidden">
             <div className="flex gap-2 shrink-0">
               <input

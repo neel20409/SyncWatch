@@ -1,6 +1,5 @@
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 
-// Load YouTube IFrame API
 let apiLoaded = false;
 
 const YouTubePlayer = forwardRef(function YouTubePlayer(
@@ -10,6 +9,12 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
   const containerRef = useRef(null);
   const playerRef = useRef(null);
   const readyRef = useRef(false);
+  const onStateChangeRef = useRef(onStateChange);
+  const onReadyRef = useRef(onReady);
+
+  // Keep refs updated without recreating the player
+  useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
+  useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
 
   const safeCall = (fn) => {
     try {
@@ -32,7 +37,6 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
   useEffect(() => {
     const initPlayer = () => {
       if (!containerRef.current) return;
-
       playerRef.current = new window.YT.Player(containerRef.current, {
         height: "100%",
         width: "100%",
@@ -44,14 +48,17 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
           modestbranding: 1,
           enablejsapi: 1,
           origin: window.location.origin,
+          // Disable annotations and end screen
+          iv_load_policy: 3,
+          fs: 1,
         },
         events: {
-          onReady: (e) => {
+          onReady: () => {
             readyRef.current = true;
-            onReady && onReady(e);
+            onReadyRef.current?.();
           },
           onStateChange: (e) => {
-            onStateChange && onStateChange(e);
+            onStateChangeRef.current?.(e);
           },
         },
       });
@@ -77,18 +84,12 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
 
     return () => {
       readyRef.current = false;
-      if (playerRef.current) {
-        try { playerRef.current.destroy(); } catch {}
-        playerRef.current = null;
-      }
+      try { playerRef.current?.destroy(); } catch {}
+      playerRef.current = null;
     };
-  }, []);
+  }, [videoId]); // re-init when videoId changes
 
-  return (
-    <div className="relative w-full h-full">
-      <div ref={containerRef} className="w-full h-full" />
-    </div>
-  );
+  return <div ref={containerRef} className="w-full h-full" />;
 });
 
 export default YouTubePlayer;
