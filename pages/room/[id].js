@@ -30,22 +30,27 @@ function cleanRoomCode(id) {
 
 export default function RoomPage() {
   const router = useRouter();
-  const rawQueryId = cleanRoomCode(router.query.id);
-  const rawPathId = typeof window !== "undefined" ? cleanRoomCode(window.location.pathname.split("/").pop()) : "";
-  const roomId = rawQueryId || rawPathId;
+  const [roomId, setRoomId] = useState("");
 
+  // Resolve the room id only after mount so the first client render
+  // matches the server-rendered (window-less) HTML — reading
+  // window.location directly in the render body caused a hydration
+  // mismatch (React errors #418/#423/#425) that crashed the page.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const path = window.location.pathname;
-      if (path.includes("undefined") || path === "/room" || path === "/room/") {
-        router.replace("/dashboard");
-        return;
-      }
+    const path = window.location.pathname;
+    if (path.includes("undefined") || path === "/room" || path === "/room/") {
+      router.replace("/dashboard");
+      return;
     }
-    if (router.isReady && !roomId) {
+    const fromQuery = cleanRoomCode(router.query.id);
+    const fromPath = cleanRoomCode(path.split("/").pop());
+    const id = fromQuery || fromPath;
+    if (id) {
+      setRoomId(id);
+    } else if (router.isReady) {
       router.replace("/dashboard");
     }
-  }, [router.isReady, roomId, router]);
+  }, [router.isReady, router.query.id, router]);
 
   const [user, setUser] = useState(null);
   const [connected, setConnected] = useState(false);
