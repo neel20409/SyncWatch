@@ -21,17 +21,31 @@ function extractVideoId(input) {
   return "";
 }
 
+function cleanRoomCode(id) {
+  if (!id || typeof id !== "string") return "";
+  const s = id.trim();
+  if (s === "undefined" || s === "null" || s === "room" || s === "[id]") return "";
+  return s;
+}
+
 export default function RoomPage() {
   const router = useRouter();
-  const rawId = router.query.id;
-  const pathId = typeof window !== "undefined" ? window.location.pathname.split("/").pop() : "";
-  const roomId = (typeof rawId === "string" && rawId !== "undefined" && rawId.trim() !== "" ? rawId : "") || (pathId !== "undefined" && pathId !== "room" ? pathId : "");
+  const rawQueryId = cleanRoomCode(router.query.id);
+  const rawPathId = typeof window !== "undefined" ? cleanRoomCode(window.location.pathname.split("/").pop()) : "";
+  const roomId = rawQueryId || rawPathId;
 
   useEffect(() => {
-    if (router.isReady && (!roomId || roomId === "undefined")) {
-      router.push("/dashboard");
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      if (path.includes("undefined") || path === "/room" || path === "/room/") {
+        router.replace("/dashboard");
+        return;
+      }
     }
-  }, [router.isReady, roomId]);
+    if (router.isReady && !roomId) {
+      router.replace("/dashboard");
+    }
+  }, [router.isReady, roomId, router]);
 
   const [user, setUser] = useState(null);
   const [connected, setConnected] = useState(false);

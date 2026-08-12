@@ -21,13 +21,17 @@ export default function Dashboard() {
     setError("");
     setCreating(true);
     try {
+      const token = localStorage.getItem("token");
       const res = await fetch("/api/room/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ name: roomName || `${user?.username}'s Room` }),
       });
       const data = await res.json();
-      if (!res.ok || !data.room?.roomId) {
+      if (!res.ok || !data.room?.roomId || data.room.roomId === "undefined") {
         setError(data.error || "Failed to create room. Please try again.");
         return;
       }
