@@ -10,6 +10,8 @@ services:
         value: production
       - key: POSTGRES_URL
         sync: false
+      - key: SyncWatch_DATABASE_URL
+        sync: false
       - key: MONGODB_URI
         sync: false
       - key: JWT_SECRET
