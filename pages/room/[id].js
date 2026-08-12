@@ -24,7 +24,14 @@ function extractVideoId(input) {
 export default function RoomPage() {
   const router = useRouter();
   const rawId = router.query.id;
-  const roomId = (typeof rawId === "string" && rawId !== "undefined" ? rawId : "") || (typeof window !== "undefined" ? window.location.pathname.split("/").pop() : "");
+  const pathId = typeof window !== "undefined" ? window.location.pathname.split("/").pop() : "";
+  const roomId = (typeof rawId === "string" && rawId !== "undefined" && rawId.trim() !== "" ? rawId : "") || (pathId !== "undefined" && pathId !== "room" ? pathId : "");
+
+  useEffect(() => {
+    if (router.isReady && (!roomId || roomId === "undefined")) {
+      router.push("/dashboard");
+    }
+  }, [router.isReady, roomId]);
 
   const [user, setUser] = useState(null);
   const [connected, setConnected] = useState(false);

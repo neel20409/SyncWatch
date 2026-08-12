@@ -13,17 +13,24 @@ export default async function handler(req, res) {
   const decoded = verifyToken(token);
   if (!decoded) return res.status(401).json({ error: "Invalid token" });
 
-  const db = await dbConnect();
+  let db;
+  try {
+    db = await dbConnect();
+  } catch (dbErr) {
+    console.error("DB Connection error in room create:", dbErr);
+    return res.status(500).json({ error: `Database connection failed: ${dbErr.message}` });
+  }
 
-  const { name, isPrivate } = req.body;
+  const { name, isPrivate } = req.body || {};
   const roomId = uuidv4().slice(0, 8).toUpperCase();
   const roomName = name || `${decoded.username}'s Room`;
-  const isPriv = isPrivate || false;
+  const isPriv = Boolean(isPrivate);
 
   try {
     if (db.type === "postgres") {
       const pool = db.pool;
-      const userIdNum = isNaN(decoded.userId) ? null : parseInt(decoded.userId, 10);
+      let userIdNum = isNaN(decoded.userId) ? null : parseInt(decoded.userId, 10);
+      if (isNaN(userIdNum)) userIdNum = null;
 
       const roomRes = await pool.query(
         "INSERT INTO rooms (room_id, name, created_by, is_private) VALUES ($1, $2, $3, $4) RETURNING *",
@@ -31,13 +38,13 @@ export default async function handler(req, res) {
       );
 
       if (userIdNum) {
-        await pool.query("UPDATE users SET rooms_created = rooms_created + 1 WHERE id = $1", [userIdNum]);
+        await pool.query("UPDATE users SET rooms_created = rooms_created + 1 WHERE id = $1", [userIdNum]).catch(() => {});
       }
 
       const rawRoom = roomRes.rows[0];
       const room = {
         id: rawRoom.id,
-        roomId: rawRoom.room_id,
+        roomId: rawRoom.room_id || roomId,
         name: rawRoom.name,
         createdBy: rawRoom.created_by,
         isPrivate: rawRoom.is_private,
@@ -54,11 +61,19 @@ export default async function handler(req, res) {
       isPrivate: isPriv,
     });
 
-    await User.findByIdAndUpdate(decoded.userId, { $inc: { roomsCreated: 1 } });
+    await User.findByIdAndUpdate(decoded.userId, { $inc: { roomsCreated: 1 } }).catch(() => {});
 
-    return res.status(201).json({ room });
+    return res.status(201).json({
+      room: {
+        id: room._id,
+        roomId: room.roomId || roomId,
+        name: room.name,
+        createdBy: room.createdBy,
+        isPrivate: room.isPrivate,
+      },
+    });
   } catch (error) {
     console.error("Room creation error:", error);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: error.message || "Server error while creating room" });
   }
 }

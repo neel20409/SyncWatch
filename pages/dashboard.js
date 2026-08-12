@@ -27,10 +27,16 @@ export default function Dashboard() {
         body: JSON.stringify({ name: roomName || `${user?.username}'s Room` }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error); return; }
+      if (!res.ok || !data.room?.roomId) {
+        setError(data.error || "Failed to create room. Please try again.");
+        return;
+      }
       router.push(`/room/${data.room.roomId}`);
-    } catch { setError("Failed to create room"); }
-    finally { setCreating(false); }
+    } catch (err) {
+      setError(`Failed to create room: ${err.message}`);
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleJoin = () => {
