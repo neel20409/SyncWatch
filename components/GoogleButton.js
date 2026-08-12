@@ -5,7 +5,18 @@ export default function GoogleButton({ text = "Continue with Google", onError })
   const router = useRouter();
   const buttonRef = useRef(null);
   const [loading, setLoading] = useState(false);
-  const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+  const [clientId, setClientId] = useState(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "");
+
+  useEffect(() => {
+    if (!clientId) {
+      fetch("/api/auth/google-config")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.clientId) setClientId(data.clientId);
+        })
+        .catch((err) => console.error("Failed to load Google Client ID:", err));
+    }
+  }, [clientId]);
 
   const handleGoogleResponse = async (response) => {
     setLoading(true);
@@ -60,7 +71,7 @@ export default function GoogleButton({ text = "Continue with Google", onError })
           theme: "outline",
           size: "large",
           width: "100%",
-          text: text.includes("Sign in") ? "signin_with" : "signup_with",
+          text: text.toLowerCase().includes("sign in") ? "signin_with" : "signup_with",
           shape: "rectangular",
           logo_alignment: "left",
         });
