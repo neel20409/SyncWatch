@@ -34,7 +34,17 @@ export default async function handler(req, res) {
         await pool.query("UPDATE users SET rooms_created = rooms_created + 1 WHERE id = $1", [userIdNum]);
       }
 
-      return res.status(201).json({ room: roomRes.rows[0] });
+      const rawRoom = roomRes.rows[0];
+      const room = {
+        id: rawRoom.id,
+        roomId: rawRoom.room_id,
+        name: rawRoom.name,
+        createdBy: rawRoom.created_by,
+        isPrivate: rawRoom.is_private,
+        currentVideoId: rawRoom.current_video_id,
+      };
+
+      return res.status(201).json({ room });
     }
 
     const room = await Room.create({

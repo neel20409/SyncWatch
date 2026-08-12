@@ -23,7 +23,8 @@ function extractVideoId(input) {
 
 export default function RoomPage() {
   const router = useRouter();
-  const { id: roomId } = router.query;
+  const rawId = router.query.id;
+  const roomId = (typeof rawId === "string" && rawId !== "undefined" ? rawId : "") || (typeof window !== "undefined" ? window.location.pathname.split("/").pop() : "");
 
   const [user, setUser] = useState(null);
   const [connected, setConnected] = useState(false);
