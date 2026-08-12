@@ -18,6 +18,8 @@ services:
         generateValue: true
       - key: NEXT_PUBLIC_SITE_URL
         sync: false
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        sync: false
       - key: NEXT_PUBLIC_SOCKET_URL
         sync: false
       - key: CORS_ORIGIN

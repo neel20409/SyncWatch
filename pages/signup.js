@@ -3,6 +3,8 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import Head from "next/head";
 
+import GoogleButton from "../components/GoogleButton";
+
 export default function Signup() {
   const router = useRouter();
   const [form, setForm] = useState({ username: "", email: "", password: "" });
@@ -60,13 +62,22 @@ export default function Signup() {
         <div className="w-full max-w-md">
           <div className="bg-[#161616] border border-[#262626] rounded-2xl p-8">
             <h1 className="font-display text-2xl font-bold text-white mb-1">Create account</h1>
-            <p className="text-gray-500 text-sm mb-8">Start watching together for free</p>
+            <p className="text-gray-500 text-sm mb-6">Start watching together for free</p>
 
             {error && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-6 break-words">
                 {error}
               </div>
             )}
+
+            <GoogleButton text="Sign up with Google" onError={(err) => setError(err)} />
+
+            <div className="relative my-6 flex items-center justify-center">
+              <div className="border-t border-[#262626] w-full"></div>
+              <span className="bg-[#161616] px-3 text-xs text-gray-500 font-display uppercase tracking-wider absolute">
+                or sign up with email
+              </span>
+            </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
