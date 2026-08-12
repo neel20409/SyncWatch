@@ -31,11 +31,13 @@ export default function Dashboard() {
         body: JSON.stringify({ name: roomName || `${user?.username}'s Room` }),
       });
       const data = await res.json();
-      if (!res.ok || !data.room?.roomId || data.room.roomId === "undefined") {
+      const targetRoomId = data.room?.roomId || data.room?.room_id;
+
+      if (!res.ok || !targetRoomId || targetRoomId === "undefined") {
         setError(data.error || "Failed to create room. Please try again.");
         return;
       }
-      router.push(`/room/${data.room.roomId}`);
+      router.push(`/room/${targetRoomId}`);
     } catch (err) {
       setError(`Failed to create room: ${err.message}`);
     } finally {

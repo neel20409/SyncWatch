@@ -42,9 +42,11 @@ export default async function handler(req, res) {
       }
 
       const rawRoom = roomRes.rows[0];
+      const targetId = rawRoom.room_id || roomId;
       const room = {
         id: rawRoom.id,
-        roomId: rawRoom.room_id || roomId,
+        roomId: targetId,
+        room_id: targetId,
         name: rawRoom.name,
         createdBy: rawRoom.created_by,
         isPrivate: rawRoom.is_private,
@@ -63,10 +65,12 @@ export default async function handler(req, res) {
 
     await User.findByIdAndUpdate(decoded.userId, { $inc: { roomsCreated: 1 } }).catch(() => {});
 
+    const targetId = room.roomId || roomId;
     return res.status(201).json({
       room: {
         id: room._id,
-        roomId: room.roomId || roomId,
+        roomId: targetId,
+        room_id: targetId,
         name: room.name,
         createdBy: room.createdBy,
         isPrivate: room.isPrivate,
