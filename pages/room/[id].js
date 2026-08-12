@@ -156,7 +156,7 @@ export default function RoomPage() {
     setUser(userData);
 
     import("socket.io-client").then(({ io }) => {
-      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined;
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" && window.location.hostname.includes("vercel.app") ? "https://syncwatch-gzdy.onrender.com" : undefined);
       const sock = io(socketUrl, { path: "/socket.io", transports: ["polling", "websocket"], reconnection: true });
       socketRef.current = sock;
 

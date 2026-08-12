@@ -1,6 +1,11 @@
 import { Html, Head, Main, NextScript } from "next/document";
 
-const URL = process.env.NEXT_PUBLIC_SITE_URL || "https://syncwatch-gzdy.onrender.com";
+const getSiteUrl = () => {
+  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "https://syncwatch-gzdy.onrender.com";
+};
+const URL = getSiteUrl();
 const TITLE = "SyncWatch — Watch YouTube Together";
 const DESC = "Watch YouTube videos in perfect sync with friends. Real-time play, pause, and seek. No account sharing needed.";
 const OG_IMAGE = `${URL}/og-image.svg`;
