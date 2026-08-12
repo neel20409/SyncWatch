@@ -47,7 +47,8 @@ export default function Watch() {
   useEffect(() => {
     if (!room) return;
     import("socket.io-client").then(({ io }) => {
-      const sock = io({ path: "/socket.io", transports: ["polling", "websocket"] });
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined;
+      const sock = io(socketUrl, { path: "/socket.io", transports: ["polling", "websocket"] });
       socketRef.current = sock;
 
       sock.on("connect", () => { setStatus("✅ Connected: " + sock.id); addLog("Socket connected: " + sock.id); sock.emit("join-room", { roomId: ROOM_ID, username: "user_" + sock.id.slice(0,4) }); });

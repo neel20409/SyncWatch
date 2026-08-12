@@ -134,7 +134,8 @@ export default function RoomPage() {
     setUser(userData);
 
     import("socket.io-client").then(({ io }) => {
-      const sock = io({ path: "/socket.io", transports: ["polling", "websocket"], reconnection: true });
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined;
+      const sock = io(socketUrl, { path: "/socket.io", transports: ["polling", "websocket"], reconnection: true });
       socketRef.current = sock;
 
       sock.on("connect", () => {

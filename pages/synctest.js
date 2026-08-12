@@ -13,7 +13,8 @@ export default function SyncTest() {
 
   useEffect(() => {
     import("socket.io-client").then(({ io }) => {
-      const sock = io({ path: "/socket.io", transports: ["polling", "websocket"] });
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || undefined;
+      const sock = io(socketUrl, { path: "/socket.io", transports: ["polling", "websocket"] });
       socketRef.current = sock;
 
       sock.on("connect", () => {

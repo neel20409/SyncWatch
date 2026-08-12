@@ -13,24 +13,42 @@ export default async function handler(req, res) {
   const decoded = verifyToken(token);
   if (!decoded) return res.status(401).json({ error: "Invalid token" });
 
-  await dbConnect();
+  const db = await dbConnect();
 
   const { name, isPrivate } = req.body;
   const roomId = uuidv4().slice(0, 8).toUpperCase();
+  const roomName = name || `${decoded.username}'s Room`;
+  const isPriv = isPrivate || false;
 
   try {
+    if (db.type === "postgres") {
+      const pool = db.pool;
+      const userIdNum = isNaN(decoded.userId) ? null : parseInt(decoded.userId, 10);
+
+      const roomRes = await pool.query(
+        "INSERT INTO rooms (room_id, name, created_by, is_private) VALUES ($1, $2, $3, $4) RETURNING *",
+        [roomId, roomName, userIdNum, isPriv]
+      );
+
+      if (userIdNum) {
+        await pool.query("UPDATE users SET rooms_created = rooms_created + 1 WHERE id = $1", [userIdNum]);
+      }
+
+      return res.status(201).json({ room: roomRes.rows[0] });
+    }
+
     const room = await Room.create({
       roomId,
-      name: name || `${decoded.username}'s Room`,
+      name: roomName,
       createdBy: decoded.userId,
-      isPrivate: isPrivate || false,
+      isPrivate: isPriv,
     });
 
     await User.findByIdAndUpdate(decoded.userId, { $inc: { roomsCreated: 1 } });
 
     return res.status(201).json({ room });
   } catch (error) {
-    console.error(error);
+    console.error("Room creation error:", error);
     return res.status(500).json({ error: "Server error" });
   }
 }

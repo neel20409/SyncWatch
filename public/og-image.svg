@@ -51,7 +51,7 @@
 
   <!-- URL badge -->
   <rect x="270" y="490" width="580" height="44" rx="8" fill="#161616" stroke="#262626" stroke-width="1"/>
-  <text x="290" y="518" font-family="'Courier New', monospace" font-size="18" fill="#555555">syncwatch-production-bf3c.up.railway.app</text>
+  <text x="290" y="518" font-family="'Courier New', monospace" font-size="18" fill="#555555">syncwatch-gzdy.onrender.com</text>
 
   <!-- Two avatar bubbles (right side) -->
   <circle cx="980" cy="260" r="65" fill="#1a1a1a" stroke="#262626" stroke-width="2"/>

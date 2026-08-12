@@ -17,12 +17,16 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   });
 
+  const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+    : "*";
+
   const io = new Server(httpServer, {
     path: "/socket.io",
-    cors: { origin: "*", methods: ["GET", "POST"], credentials: false },
+    cors: { origin: allowedOrigins, methods: ["GET", "POST"], credentials: false },
     allowEIO3: true,
     transports: ["polling", "websocket"],
-    // Increase ping timeout for Railway
+    // Increase ping timeout for Render / Cloud hosting
     pingTimeout: 60000,
     pingInterval: 25000,
   });
@@ -130,7 +134,8 @@ app.prepare().then(() => {
   });
 
   const PORT = process.env.PORT || 3000;
-  httpServer.listen(PORT, () => {
-    console.log(`[${process.pid}] Ready on http://localhost:${PORT}`);
+  const HOST = process.env.HOST || "0.0.0.0";
+  httpServer.listen(PORT, HOST, () => {
+    console.log(`[${process.pid}] Ready on http://${HOST}:${PORT}`);
   });
 });

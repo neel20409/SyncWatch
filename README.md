@@ -107,17 +107,44 @@ yt-watch-party/
 1. Create a free cluster at [cloud.mongodb.com](https://cloud.mongodb.com)
 2. Replace `MONGODB_URI` in `.env.local` with your Atlas connection string
 
-### Using Vercel + Railway (recommended)
-1. Push to GitHub
-2. Deploy to Vercel (set env vars in Vercel dashboard)
-3. **Note**: Socket.io requires a persistent server — use Railway, Render, or a VPS instead of Vercel serverless
-4. OR deploy the entire app to **Railway** / **Render** with `npm start`
+### Deploying to Render (Recommended)
+
+#### Option A: One-Click / Blueprint Deploy (Easiest)
+1. Push your repository to GitHub.
+2. Go to [Render Dashboard](https://dashboard.render.com/) and click **New > Blueprint**.
+3. Connect your GitHub repository. Render will automatically detect `render.yaml`.
+4. Provide your `MONGODB_URI` from MongoDB Atlas.
+5. Click **Apply** to deploy!
+
+#### Option B: Manual Render Web Service Setup
+1. Push your repository to GitHub.
+2. Go to [Render Dashboard](https://dashboard.render.com/) and click **New > Web Service**.
+3. Connect your `SyncWatch` GitHub repository.
+4. Configure service settings:
+   - **Environment**: Node
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `npm start`
+5. Add Environment Variables under **Advanced**:
+   - `MONGODB_URI`: your MongoDB Atlas connection string
+   - `JWT_SECRET`: your secret key for JWT signing
+   - `NODE_ENV`: `production`
+   - `NEXT_PUBLIC_SITE_URL`: `https://your-app-name.onrender.com`
+6. Click **Create Web Service**.
+
+### Option C: Decoupled Deploy (Vercel Frontend + Render Backend)
+If you deploy the frontend on Vercel and the persistent server (Socket.io) on Render:
+- Set `NEXT_PUBLIC_SOCKET_URL=https://your-backend.onrender.com` on Vercel.
+- Set `CORS_ORIGIN=https://your-frontend.vercel.app` on Render.
 
 ### Environment Variables for Production
 ```env
-MONGODB_URI=mongodb+srv://...
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/syncwatch?retryWrites=true&w=majority
 JWT_SECRET=a-long-random-secret-string
 NODE_ENV=production
+NEXT_PUBLIC_SITE_URL=https://your-app-name.onrender.com
+# Optional if hosting backend separately:
+# NEXT_PUBLIC_SOCKET_URL=https://your-backend.onrender.com
+# CORS_ORIGIN=https://your-frontend.vercel.app
 ```
 
 ---

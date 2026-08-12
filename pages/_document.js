@@ -1,6 +1,6 @@
 import { Html, Head, Main, NextScript } from "next/document";
 
-const URL = "https://syncwatch-production-bf3c.up.railway.app";
+const URL = process.env.NEXT_PUBLIC_SITE_URL || "https://syncwatch-gzdy.onrender.com";
 const TITLE = "SyncWatch — Watch YouTube Together";
 const DESC = "Watch YouTube videos in perfect sync with friends. Real-time play, pause, and seek. No account sharing needed.";
 const OG_IMAGE = `${URL}/og-image.svg`;
